@@ -1,0 +1,17 @@
+# secrets: never upload
+.env
+whatsapp-bot.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# editor / system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
