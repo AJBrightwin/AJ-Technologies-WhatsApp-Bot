@@ -75,7 +75,16 @@ def route(c, kind, text, action, media, first_time):
         return bot.send_menu(c)
     if bot.GREETINGS.match(text) and (first_time or kind == 'request_welcome' or quiet_for(c, hours=12)):
         return bot.welcome(c)
+    if bot.GREETINGS.match(text) is None and ai.is_off_topic(text, last_bot_text(c)):
+        return bot.say(c, 'off_topic')            # never let the main AI answer off-topic questions
     return converse(c)
+
+
+def last_bot_text(c):
+    for m in reversed(db.recent_messages(c['wa_id'], 4)):
+        if m['direction'] == 'out':
+            return m['body']
+    return ''
 
 
 def quiet_for(c, hours):
@@ -194,6 +203,10 @@ def converse(c, note='', image=None):
     history = ai.history_messages(db.recent_messages(c['wa_id'], HISTORY))
     if not history or history[-1]['role'] != 'user':
         history.append({'role': 'user', 'content': '(see the note)' if note else '(message)'})
+    if not note and history and ai.asks_price(history[-1]['content']):
+        note = ('The customer is asking about price / a quote. NEVER give any amount, range, estimate or currency. Say '
+                'every project is custom-built and our team sends a free, clear quote within 24 hours, then collect the '
+                'enquiry details (save_enquiry_details / show_enquiry_summary).')
     try:
         reply = ai.run_agent(system_prompt(c, a), history, TOOLS, lambda name, args: run_tool(c, a, turn, name, args),
                              image=image, note=note, max_rounds=5, max_tokens=700)
@@ -208,6 +221,9 @@ def converse(c, note='', image=None):
 
 
 def deliver(c, reply, turn):
+    if reply and ai.mentions_price(reply):
+        log.warning('AI reply had a price in it; replaced with the price policy: %s', reply[:300])
+        reply = t(bot.lang(c), 'price_policy')
     sent = False
     if reply:
         bot.text_to(c, reply)
@@ -452,6 +468,10 @@ def system_prompt(c, a):
         parts.append('SUPPORT REQUEST DRAFT IN PROGRESS: ' + db.dumps(a['support']))
     now = bot.now_ist()
     parts.append(f'NOW: {now:%A %d %B %Y, %I:%M %p} India time.')
+    parts.append('REMEMBER: answer ONLY about AJ Technologies, our services and this customer\'s own work with us. For '
+                 'anything else (e.g. how to do vibe coding / coding / any general topic) do not explain it at all: reply with '
+                 'the one polite "I\'m AJ Technologies Assistant, so I can help only with AJ Technologies..." sentence. '
+                 'Keep replies short (max about 110 words), at most one emoji, no numbered lists unless really needed.')
     return '\n\n'.join(parts)
 
 

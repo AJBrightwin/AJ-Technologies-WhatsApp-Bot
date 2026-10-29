@@ -8,6 +8,7 @@ buttons and simple keyword matching (see bot.py).
 import base64
 import json
 import logging
+import re
 import threading
 from datetime import datetime
 
@@ -130,6 +131,66 @@ def run_agent(system, history, tools, execute, image=None, note='', max_rounds=5
                              'content': json.dumps(result, ensure_ascii=False, default=str)[:8000]})
     msg = _complete(messages, max_tokens=max_tokens, temperature=temperature)
     return (msg.content or '').strip() or spoken
+
+
+TOPIC_FILTER = """You are a strict topic filter for the WhatsApp assistant of AJ Technologies, a company in Thoothukudi
+that BUILDS websites, online stores, mobile apps, software / SaaS / web apps for clients, and does SEO, digital
+marketing, social media, Google Business Profile, domains, hosting, maintenance and WhatsApp-for-business setups.
+
+Decide whether the customer's LATEST message may be answered.
+
+ALLOWED:
+- greetings, thanks, "ok", short small talk, "who are you", "what is your name"
+- anything about AJ Technologies: the company, owner, team, location, working hours, services, prices, process,
+  portfolio, policies, offers, contact details, reviews
+- wanting a website / online store / app / software / marketing / domain / hosting FROM AJ Technologies for their
+  business, or asking what we can build or how we can help their business
+- their own enquiry, quote, call booking, project status, renewal, support request, complaint, or a problem with a
+  website / app we made for them
+- an answer to the assistant's previous question (a name, business name, place, date, time, yes / no, email, phone
+  number, a description of what they need)
+- asking to talk to a person
+
+OFF_TOPIC (everything else), for example:
+- learning or doing technology themselves: "how to do vibe coding", "vibe coding eppadi", "teach me Python",
+  "how do I build a website myself", "fix my code", "what is AI", "which laptop / phone to buy"
+- general knowledge, news, politics, religion, sports, cricket, films, songs, health, legal or money advice,
+  recipes, jokes, stories, homework, essays, translations, other companies' products
+
+The message can be in Tamil script, Tanglish, English or any other language; judge the meaning.
+Reply JSON only: {"verdict": "allowed"} or {"verdict": "off_topic"}. If it is truly unclear, "allowed"."""
+
+
+def is_off_topic(text, last_bot=''):
+    """True when the customer's message is clearly not about AJ Technologies / our services.
+    A separate, small check, so the main AI never gets the chance to answer it. Fails open (False)."""
+    text = ' '.join(str(text or '').split())
+    if not text or len(text) < 4:
+        return False
+    user = (f'The assistant\'s previous message: {last_bot[:400]}\n\n' if last_bot else '') + f'Customer\'s latest message: {text[:800]}'
+    try:
+        msg = _complete([{'role': 'system', 'content': TOPIC_FILTER}, {'role': 'user', 'content': user}],
+                        json_mode=True, max_tokens=15, temperature=0)
+        return json.loads(msg.content or '{}').get('verdict') == 'off_topic'
+    except Exception as e:
+        log.info('Topic filter skipped: %s', e)
+        return False
+
+
+PRICE_RE = re.compile(
+    r'(₹|ரூ\.?\s*\d|\brs\.?\s*\d|\binr\s*\d|\$\s*\d|\d\s*(?:k\b|rs\b|rupees?|ரூபாய்|dollars?|usd|inr)'
+    r'|\d[\d,]*\s*(?:/|per)\s*(?:month|year|yr|mo)\b|\bprice\s*(?:is|:)\s*\d|starting\s*(?:from|at)\s*\d)', re.I)
+PRICE_WORDS = re.compile(r'price|cost|rate|charge|quote|quotation|budget|how much|evlo|evvalavu|evvalo|kitna|'
+                         r'விலை|கட்டணம்|எவ்வளவு|செலவு|fees?|amount|package', re.I)
+
+
+def mentions_price(text):
+    """True when a reply gives an amount of money (the bot must never quote prices)."""
+    return bool(PRICE_RE.search(text or ''))
+
+
+def asks_price(text):
+    return bool(PRICE_WORDS.search(text or ''))
 
 
 def history_messages(history):

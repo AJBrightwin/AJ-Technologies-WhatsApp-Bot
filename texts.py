@@ -699,6 +699,11 @@ T.update({
         'ta': "நன்றி, உங்கள் கோப்பு கிடைத்தது, எங்கள் குழுவிடம் பகிர்ந்துவிட்டேன். அவர்கள் பார்ப்பார்கள்.",
         'tanglish': "Nandri, unga file kedaichiduchu, engal team-kitta share pannitten. Avanga paarppanga.",
     },
+    'price_policy': {
+        'en': "Every project is custom-built for your business, so we don't share fixed prices here. Our team will send you a free, clear quote within 24 hours once we understand what you need. Shall I take a few details now?",
+        'ta': "ஒவ்வொரு திட்டமும் உங்கள் வணிகத்திற்காக தனிப்பயனாக உருவாக்கப்படுகிறது, அதனால் இங்கே நிலையான விலைகளைச் சொல்வதில்லை. உங்கள் தேவையைப் புரிந்துகொண்ட பிறகு எங்கள் குழு 24 மணி நேரத்திற்குள் இலவச, தெளிவான மதிப்பீட்டை அனுப்பும். இப்போது சில விவரங்களைச் சொல்லலாமா?",
+        'tanglish': "Ovvoru project-um unga business-ku custom-aa build pannuvom, adhanaala inga fixed price solradhu illa. Unga requirement purinjadhum engal team 24 hours-kulla free, clear quote anuppuvaanga. Ippo konjam details sollalaamaa?",
+    },
     'ai_booked': {
         'en': "✅ Your call is booked for *{when}*. Our team will call you on {phone}.",
         'ta': "✅ உங்கள் அழைப்பு *{when}* அன்று பதிவு செய்யப்பட்டது. எங்கள் குழு {phone} எண்ணில் அழைக்கும்.",
