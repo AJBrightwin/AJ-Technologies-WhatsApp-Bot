@@ -9,6 +9,7 @@ Background jobs, run every WORKER_SECONDS (and by /cron/tick):
 Everything is claimed row by row in the database, so nothing is sent twice even
 if two copies of the bot run for a moment during a deploy.
 """
+import json
 import logging
 import threading
 import time
@@ -26,10 +27,12 @@ _start_lock = threading.Lock()
 _tick_lock = threading.Lock()
 
 ADMIN_KINDS = {'new_enquiry', 'enquiry_reminder', 'call_booked', 'call_reminder', 'call_cancelled', 'call_request',
-               'human_request', 'new_review', 'private_feedback', 'test', 'new_ticket', 'lead_reply', 'renewal_reply'}
+               'human_request', 'new_review', 'private_feedback', 'test', 'new_ticket', 'lead_reply', 'renewal_reply',
+               'openai_problem'}
 ICONS = {'new_enquiry': '📥', 'enquiry_reminder': '⏰', 'call_booked': '📅', 'call_reminder': '⏰',
          'call_cancelled': '❌', 'call_request': '📞', 'human_request': '🙋', 'new_review': '⭐',
-         'private_feedback': '💬', 'test': '✅', 'new_ticket': '🛠️', 'lead_reply': '📣', 'renewal_reply': '🔁'}
+         'private_feedback': '💬', 'test': '✅', 'new_ticket': '🛠️', 'lead_reply': '📣', 'renewal_reply': '🔁',
+         'openai_problem': '⚠️', 'admin_file': '📎'}
 
 
 def admin_contact():
@@ -49,6 +52,7 @@ def send_admin_alert(alert):
         if alert['customer_phone']:
             lines.append(f"\nChat: https://wa.me/{config.digits(alert['customer_phone'])}")
         lines.append(f'Dashboard: {config.DASHBOARD_URL}')
+        lines.append('_Reply here if you want me to do anything about it._')
         return wa.send_text(config.ADMIN_WA_NUMBER, '\n'.join(lines), sender='system')
     params = [alert['summary'], alert['customer_name'] or '-', alert['customer_phone'] or '-']
     preview = (f"{alert['summary']}\nCustomer: {params[1]}\nPhone: {params[2]}")
@@ -71,6 +75,8 @@ def process_alert(alert):
         text = t(bot.lang(contact), 'bk_reminder', time=bot.time_label(booking['call_time'].strftime('%H:%M')),
                  phone=bot.phone_display(contact['wa_id']))
         _, error = wa.send_text(contact['wa_id'], text)
+    elif kind == 'admin_file':
+        _, error = send_admin_file(alert)
     elif kind in ADMIN_KINDS:
         _, error = send_admin_alert(alert)
     else:
@@ -145,8 +151,10 @@ def tick():
         except Exception as e:
             log.exception('Broadcast job failed')
             done['errors'].append(f'broadcasts: {e}')
+        import subscriptions
         for name, job in (('summary', run_daily_reports), ('acks', process_enquiry_acks),
-                          ('follow-ups', process_followups), ('renewals', process_renewals)):
+                          ('follow-ups', process_followups), ('renewals', process_renewals),
+                          ('subscriptions', subscriptions.run_daily)):
             try:
                 job()
             except Exception as e:
@@ -195,7 +203,7 @@ def send_admin_text(text, one_line):
     if db.window_open(admin):
         return wa.send_text(config.ADMIN_WA_NUMBER, text, sender='system')
     return wa.send_template(config.ADMIN_WA_NUMBER, config.ADMIN_TEMPLATE_NAME, config.ADMIN_TEMPLATE_LANG,
-                            [one_line, 'AJ Technologies', 'Reply "summary" to see more'],
+                            [one_line, 'AJ Technologies', 'Reply here to see more or ask me anything'],
                             preview=text, sender='system')
 
 
@@ -376,3 +384,39 @@ def process_renewals():
         if errors:
             db.queue_alert('renewal_reply', f"Renewal reminder for {r['item']} {label} ({r['client_name']}) failed",
                            customer_name=r['client_name'], detail=errors[0], ref_id=r['id'])
+
+
+# ===========================================================================
+# Upgrade v3: a file (PDF, Word, Excel ...) a customer sent goes to AJ with the file attached
+# ===========================================================================
+def send_admin_file(alert):
+    """Free document message when AJ's 24 hours are open, otherwise the aj_file_alert template (document header).
+    If the file cannot be sent, AJ still gets a normal alert and can open the file in the dashboard chat."""
+    try:
+        info = json.loads(alert['detail'] or '{}')
+    except ValueError:
+        info = {}
+    filename = info.get('filename') or 'file'
+    caption = (f"📎 {alert['customer_name'] or 'A customer'} ({alert['customer_phone'] or '-'}) sent this file"
+               + (f": {info['caption']}" if info.get('caption') else '') + '\nReply here if you want me to do anything about it.')
+    plain = dict(alert, detail=f"File: {filename}" + (f"\nMessage: {info['caption']}" if info.get('caption') else '')
+                 + '\nOpen the chat in the dashboard to download it.')
+    data, mime = wa.download_media(info.get('media_id') or '', max_bytes=60 * 1024 * 1024) if info.get('media_id') else (None, '')
+    if not data:
+        return send_admin_alert(plain)
+    media_id, error = wa.upload_media(data, mime or info.get('mime') or 'application/octet-stream', filename)
+    if error:
+        log.warning('Could not upload the file for AJ: %s', error)
+        return send_admin_alert(plain)
+    if db.window_open(admin_contact()):
+        wamid, error = wa.send_document(config.ADMIN_WA_NUMBER, media_id, filename, caption)
+        if not error:
+            return wamid, error
+    wamid, error = wa.send_template(config.ADMIN_WA_NUMBER, config.TPL_ADMIN_FILE, config.ADMIN_TEMPLATE_LANG,
+                                    [alert['customer_name'] or 'A customer', alert['customer_phone'] or '-', filename],
+                                    header_document={'id': media_id, 'filename': filename},
+                                    preview=f"[Template {config.TPL_ADMIN_FILE}] {caption}", sender='system')
+    if error:
+        log.warning('File template not sent (%s); sending a normal alert', error)
+        return send_admin_alert(plain)
+    return wamid, error

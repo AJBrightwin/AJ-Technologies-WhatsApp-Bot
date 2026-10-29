@@ -1,11 +1,17 @@
 """
-Commands AJ can send to the bot from his own WhatsApp number (ADMIN_WA_NUMBER).
+AJ's own assistant: messages from AJ's WhatsApp number (ADMIN_WA_NUMBER).
 
-Nobody else can use these: messages from any other number go to the normal customer bot.
+Upgrade v3: AJ simply asks in his own words ("any new leads?", "mark 12 as won", "tell Ravi his site is
+live", "Render renewed") and the AI answers with real data from the database through the tools in
+admin_ai.py. AJ is treated as the owner, so he can also ask general questions.
+
+Nobody else can use this: messages from any other number go to the normal customer bot.
+If OpenAI is not available, the simple typed commands (HELP below) still work.
 """
 import re
 from datetime import timedelta
 
+import ai
 import bot
 import config
 import db
@@ -50,7 +56,19 @@ def reply(c, text):
     wa.send_text(c['wa_id'], text, sender='bot')
 
 
-def handle(c, text):
+def handle(c, text, image=None):
+    """AJ's message: the AI assistant answers (upgrade v3). Without OpenAI, the simple commands below work."""
+    if ai.enabled():
+        try:
+            answer = assistant(c, text, image)
+            if answer:
+                return reply(c, answer)
+        except Exception:
+            bot.log.exception('AJ assistant failed; using the simple commands')
+    handle_commands(c, text)
+
+
+def handle_commands(c, text):
     raw = (text or '').strip()
     low = ' '.join(raw.lower().split()).rstrip('.!?')
     try:
@@ -182,22 +200,24 @@ def ticket_text(ticket_id):
     ] + ([f"💬 Last note to client: {tk['client_update']}"] if tk['client_update'] else []))
 
 
-def update_ticket(ticket_id, status, note):
+def update_ticket(ticket_id, status, note, notify=True):
     tk = db.get_ticket(ticket_id)
     if not tk:
         return f'No support request #{ticket_id}.'
     tk = db.set_ticket_status(ticket_id, status, note)
+    if not notify:
+        return f"✅ Request #{ticket_id} is now *{TICKET_LABEL[status]}* (the client was not messaged)."
     _, error = bot.notify_ticket(tk, note)
     told = f'⚠️ Could not message the client: {error}' if error else '📨 The client has been told.'
     return f"✅ Request #{ticket_id} is now *{TICKET_LABEL[status]}*.\n{told}"
 
 
-def renewals_text():
-    items = db.upcoming_renewals(30)
+def renewals_text(days=30):
+    items = db.upcoming_renewals(days)
     if not items:
-        return '🔁 No renewals in the next 30 days.'
+        return f'🔁 No client renewals in the next {days} days.'
     today = bot.now_ist().date()
-    lines = [f'🔁 *Renewals in the next 30 days* ({len(items)})', '']
+    lines = [f'🔁 *Client renewals in the next {days} days* ({len(items)})', '']
     for r in items:
         days = (r['expiry_date'] - today).days
         when = 'EXPIRED' if days < 0 else 'today' if days == 0 else f'in {days} days'
@@ -234,3 +254,8 @@ def reply_to_customer(number, message):
         return f'⚠️ Not sent: {error}'
     db.update_contact(wa_id, needs_reply=False, unread_count=0)
     return f'✅ Sent to {bot.display_name(contact) or bot.phone_display(wa_id)}.'
+
+
+def assistant(c, text, image=None):
+    import admin_ai
+    return admin_ai.answer(c, text, image)

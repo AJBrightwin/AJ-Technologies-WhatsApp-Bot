@@ -138,6 +138,14 @@ def send_image(to, link, caption='', sender='bot'):
                  'image', caption or '[image]', sender)
 
 
+def send_document(to, media_id, filename, caption='', sender='system'):
+    caption = clip(caption, LIMIT['caption'])
+    doc = {'id': media_id, 'filename': clip(filename or 'file', 200)}
+    if caption:
+        doc['caption'] = caption
+    return _send(to, {'type': 'document', 'document': doc}, 'document', caption or f'[file: {filename}]', sender)
+
+
 def template_param(value):
     """Template values may not contain new lines, tabs or more than 4 spaces in a row."""
     text = ' '.join(str(value if value not in (None, '') else '-').split())
@@ -145,10 +153,12 @@ def template_param(value):
 
 
 def send_template(to, name, language, body_params=(), header_image='', quick_reply_payloads=(),
-                  preview='', sender='system', record=True):
+                  preview='', sender='system', record=True, header_document=None):
     components = []
     if header_image:
         components.append({'type': 'header', 'parameters': [{'type': 'image', 'image': {'link': header_image}}]})
+    if header_document:                           # {'id': uploaded media id, 'filename': 'quote.pdf'}
+        components.append({'type': 'header', 'parameters': [{'type': 'document', 'document': header_document}]})
     if body_params:
         components.append({'type': 'body', 'parameters': [{'type': 'text', 'text': template_param(p)}
                                                           for p in body_params]})
@@ -212,3 +222,22 @@ def download_media(media_id, max_bytes=16 * 1024 * 1024):
     except (requests.RequestException, ValueError, KeyError) as e:
         log.warning('Media %s download failed: %s', media_id, e)
         return None, ''
+
+
+def upload_media(data, mime, filename='file'):
+    """Upload a file to WhatsApp so it can be sent on. Returns (media_id, error)."""
+    if not config.META_ACCESS_TOKEN or not config.PHONE_NUMBER_ID:
+        return None, 'META_ACCESS_TOKEN / PHONE_NUMBER_ID not set'
+    mime = (mime or 'application/octet-stream').split(';')[0].strip()
+    try:
+        r = _session.post(_url(f'{config.PHONE_NUMBER_ID}/media'), headers=_headers(), timeout=90,
+                          data={'messaging_product': 'whatsapp', 'type': mime},
+                          files={'file': (filename or 'file', data, mime)})
+    except requests.RequestException as e:
+        return None, f'Network error: {e}'
+    if r.status_code >= 400:
+        return None, error_text(r)
+    try:
+        return r.json()['id'], ''
+    except (ValueError, KeyError):
+        return None, f'Unexpected reply from WhatsApp: {r.text[:200]}'

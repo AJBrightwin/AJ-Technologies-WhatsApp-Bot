@@ -44,7 +44,106 @@ def _complete(messages, json_mode=False, tools=None, max_tokens=500, temperature
     if tools:
         kwargs['tools'] = tools
         kwargs['tool_choice'] = 'auto'
-    return client().chat.completions.create(**kwargs).choices[0].message
+    try:
+        return client().chat.completions.create(**kwargs).choices[0].message
+    except Exception as e:
+        report_problem(e)
+        raise
+
+
+def problem_kind(error):
+    """'quota' when the OpenAI credits are finished, 'key' when the API key is wrong, else ''."""
+    text = f'{getattr(error, "code", "")} {error}'.lower()
+    if 'insufficient_quota' in text or 'exceeded your current quota' in text or 'billing' in text:
+        return 'quota'
+    if getattr(error, 'status_code', None) == 401 or 'invalid_api_key' in text or 'incorrect api key' in text:
+        return 'key'
+    return ''
+
+
+def report_problem(error):
+    """Tell AJ at once (max every 6 hours) when OpenAI stops working because of credits or the key."""
+    kind = problem_kind(error)
+    if not kind:
+        return
+    try:
+        import db
+        if db.recent_alert('openai_problem', '', 6):
+            return
+        summary = ('OpenAI credits are finished, so the bot is answering with menus only. Please recharge at '
+                   'platform.openai.com > Settings > Billing.' if kind == 'quota' else
+                   'The OpenAI API key is not working, so the bot is answering with menus only. Please check '
+                   'OPENAI_API_KEY on Render.')
+        db.queue_alert('openai_problem', summary, detail=str(error)[:500])
+    except Exception:
+        log.exception('Could not queue the OpenAI alert')
+
+
+# ---------------------------------------------------------------------------
+# The tool-calling loop used by the customer chat (agent.py) and AJ's assistant (admin.py)
+# ---------------------------------------------------------------------------
+def run_agent(system, history, tools, execute, image=None, note='', max_rounds=5, max_tokens=700,
+              temperature=0.4):
+    """Let the AI answer, calling our tools as often as it needs. Returns the final reply text.
+
+    history: chat messages (oldest first), the newest customer message last.
+    execute(name, args) -> dict: runs one tool and returns its result for the AI.
+    image:   (bytes, mime, caption) sent with the newest message.
+    note:    one-off information for this turn (e.g. "the customer tapped Edit").
+    """
+    messages = [{'role': 'system', 'content': system}] + list(history)
+    if image:
+        data, mime, caption = image
+        content = [{'type': 'text', 'text': caption or '(photo)'},
+                   {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{base64.b64encode(data).decode()}'}}]
+        if messages[-1]['role'] == 'user':
+            messages[-1] = {'role': 'user', 'content': content}
+        else:
+            messages.append({'role': 'user', 'content': content})
+    if note:
+        messages.append({'role': 'system', 'content': f'NOTE FOR THIS REPLY: {note}'})
+    spoken = ''
+    for _ in range(max_rounds):
+        msg = _complete(messages, tools=tools, max_tokens=max_tokens, temperature=temperature)
+        calls = msg.tool_calls or []
+        if not calls:
+            return (msg.content or '').strip() or spoken
+        if msg.content and msg.content.strip():
+            spoken = msg.content.strip()
+        messages.append({'role': 'assistant', 'content': msg.content or None,
+                         'tool_calls': [{'id': c.id, 'type': 'function',
+                                         'function': {'name': c.function.name, 'arguments': c.function.arguments or '{}'}}
+                                        for c in calls]})
+        for call in calls:
+            try:
+                args = json.loads(call.function.arguments or '{}')
+                if not isinstance(args, dict):
+                    args = {}
+            except ValueError:
+                args = {}
+            try:
+                result = execute(call.function.name, args)
+            except Exception as e:
+                log.exception('Tool %s failed', call.function.name)
+                result = {'error': f'That did not work ({type(e).__name__}). Apologise briefly and offer another way.'}
+            messages.append({'role': 'tool', 'tool_call_id': call.id,
+                             'content': json.dumps(result, ensure_ascii=False, default=str)[:8000]})
+    msg = _complete(messages, max_tokens=max_tokens, temperature=temperature)
+    return (msg.content or '').strip() or spoken
+
+
+def history_messages(history):
+    """wa_messages rows -> chat messages for the AI."""
+    out = []
+    for m in history:
+        role = 'user' if m['direction'] == 'in' else 'assistant'
+        text = m['body']
+        if m['sender'] == 'admin':
+            text = f'(Our team member wrote this reply:) {text}'
+        elif m['sender'] == 'system':
+            text = f'(Automatic message:) {text}'
+        out.append({'role': role, 'content': text[:1500]})
+    return out
 
 
 def lang_name(code):
@@ -55,10 +154,21 @@ def lang_name(code):
 # Company knowledge (what the AI may say)
 # ---------------------------------------------------------------------------
 KNOWLEDGE = f"""
-COMPANY: {config.COMPANY} ("{config.TAGLINE}"), a web, app and digital marketing company in {config.LOCATION}.
+COMPANY: {config.COMPANY} ("{config.TAGLINE}"), a web, app, software and digital marketing company in {config.LOCATION}.
 We work with businesses across Tamil Nadu and all over India, fully end to end: idea, design, development, launch, marketing and support.
 Phone / WhatsApp for the team: {config.PHONE_DISPLAY}. Email: {config.EMAIL}. Website: {config.SITE_URL}
-Portfolio: {config.PORTFOLIO_URL}. Instagram: {config.INSTAGRAM}. YouTube: {config.YOUTUBE}
+Portfolio: {config.PORTFOLIO_URL}. Contact page: {config.CONTACT_URL}. Instagram: {config.INSTAGRAM}. YouTube: {config.YOUTUBE}
+
+ABOUT US
+- Founder, CEO and Owner: {config.OWNER_NAME}.
+- Based in Thoothukudi (Tuticorin), Tamil Nadu. We serve businesses all over India; meetings can be online or by phone.
+- A dedicated team of skilled developers and designers. (Never give a number of people.)
+- We have built many successful websites, online stores, apps and software for shops, clinics, restaurants, schools,
+  professionals, startups and growing brands, and our clients keep coming back for more. (Never give a number of
+  projects, clients or years.)
+- Availability: this assistant answers 24 hours a day, 7 days a week. Our team replies to every enquiry within 24 hours.
+- Why choose us: everything custom built for the business (no copy-paste templates), modern and fast, mobile-first,
+  SEO-ready, English & Tamil, honest advice, one team from idea to launch and support after launch.
 
 SERVICES
 - Business Websites: professional, mobile-friendly sites for shops, clinics, restaurants, schools, professionals. Contact form, WhatsApp button, Google Maps, SEO basics, English & Tamil, admin panel, SSL, speed optimised, free support after launch.

@@ -305,7 +305,7 @@ def claim_nudges(after_hours, limit=20):
     return rows("""UPDATE wa_contacts SET nudged_at = now()
                    WHERE wa_id IN (
                        SELECT wa_id FROM wa_contacts
-                       WHERE bot_enabled AND state ? 'flow'
+                       WHERE bot_enabled AND (state ? 'flow' OR state ? 'ai_pending')
                          AND last_inbound_at < now() - make_interval(hours => %s)
                          AND last_inbound_at > now() - interval '23 hours 40 minutes'
                          AND (nudged_at IS NULL OR nudged_at < last_inbound_at)
@@ -628,3 +628,125 @@ def upcoming_renewals(days=30):
 
 def pending_unanswered(limit=10):
     return rows("""SELECT * FROM bot_unanswered WHERE status = 'pending' ORDER BY created_at DESC LIMIT %s""", (limit,))
+
+
+
+# ===========================================================================
+# Upgrade v3: AJ's AI assistant (admin.py) and his own subscriptions (supabase_upgrade_v3.sql)
+# ===========================================================================
+def search_enquiries(status='', days=30, text='', limit=10):
+    where, params = ["created_at > now() - make_interval(days => %s)"], [days]
+    if status:
+        where.append('status = %s')
+        params.append(status)
+    if text:
+        where.append("(name ILIKE %s OR business_name ILIKE %s OR phone ILIKE %s OR email ILIKE %s OR message ILIKE %s)")
+        params += [f'%{text}%'] * 5
+    return rows(f"SELECT * FROM contact_enquiries WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT %s",
+                (*params, limit))
+
+
+def calls_between(day_from, day_to, status='booked'):
+    return rows("""SELECT * FROM wa_bookings WHERE call_date BETWEEN %s AND %s AND (%s = '' OR status = %s)
+                   ORDER BY call_date, call_time""", (day_from, day_to, status, status))
+
+
+def find_contacts(text, limit=8):
+    d = ''.join(ch for ch in text if ch.isdigit())
+    return rows("""SELECT wa_id, name, profile_name, business_name, email, last_inbound_at, needs_reply, opted_out
+                   FROM wa_contacts
+                   WHERE wa_id <> %s AND (name ILIKE %s OR profile_name ILIKE %s OR business_name ILIKE %s
+                         OR (%s <> '' AND wa_id LIKE %s))
+                   ORDER BY last_inbound_at DESC NULLS LAST LIMIT %s""",
+                (config.ADMIN_WA_NUMBER, f'%{text}%', f'%{text}%', f'%{text}%', d, f'%{d[-10:]}%', limit))
+
+
+def waiting_chats(limit=10):
+    return rows("""SELECT wa_id, name, profile_name, last_inbound_at, last_message_preview FROM wa_contacts
+                   WHERE needs_reply AND wa_id <> %s ORDER BY last_inbound_at DESC NULLS LAST LIMIT %s""",
+                (config.ADMIN_WA_NUMBER, limit))
+
+
+def unanswered_list(limit=10):
+    return rows("""SELECT id, question, created_at FROM bot_unanswered WHERE status = 'pending'
+                   ORDER BY created_at DESC LIMIT %s""", (limit,))
+
+
+def answer_unanswered(question_id, answer, question=''):
+    q = one('SELECT * FROM bot_unanswered WHERE id = %s', (question_id,))
+    if not q:
+        return None
+    k = one("""INSERT INTO bot_knowledge (kind, question, answer) VALUES ('faq', %s, %s) RETURNING id""",
+            ((question or q['question'])[:300], answer[:4000]))
+    run("UPDATE bot_unanswered SET status = 'answered', knowledge_id = %s WHERE id = %s", (k['id'], question_id))
+    return k['id']
+
+
+def ignore_unanswered(question_id):
+    return one("UPDATE bot_unanswered SET status = 'ignored' WHERE id = %s RETURNING id", (question_id,)) is not None
+
+
+def knowledge_list(limit=40):
+    return rows("SELECT id, kind, question, answer, is_active FROM bot_knowledge ORDER BY sort_order, id LIMIT %s", (limit,))
+
+
+def add_knowledge(kind, question, answer):
+    return one("INSERT INTO bot_knowledge (kind, question, answer) VALUES (%s, %s, %s) RETURNING id",
+               (kind, question[:300], answer[:4000]))['id']
+
+
+def set_knowledge(knowledge_id, active=None, answer=None):
+    return one("""UPDATE bot_knowledge SET is_active = COALESCE(%s, is_active), answer = COALESCE(%s, answer)
+                  WHERE id = %s RETURNING *""", (active, answer, knowledge_id))
+
+
+def search_client_projects(text='', limit=10):
+    return rows("""SELECT * FROM client_projects WHERE is_active
+                     AND (%s = '' OR client_name ILIKE %s OR business_name ILIKE %s OR title ILIKE %s)
+                   ORDER BY updated_at DESC LIMIT %s""", (text, f'%{text}%', f'%{text}%', f'%{text}%', limit))
+
+
+def get_client_project(project_id):
+    return one('SELECT * FROM client_projects WHERE id = %s', (project_id,))
+
+
+def update_client_project(project_id, stage=None, progress=None, client_note=None, live_url=None):
+    return one("""UPDATE client_projects SET stage = COALESCE(%s, stage), progress = COALESCE(%s, progress),
+                         client_note = COALESCE(%s, client_note), live_url = COALESCE(%s, live_url)
+                  WHERE id = %s RETURNING *""", (stage, progress, client_note, live_url, project_id))
+
+
+# ---- AJ's own subscriptions -------------------------------------------------
+def subscriptions(active_only=True):
+    return rows(f"""SELECT * FROM my_subscriptions {'WHERE is_active' if active_only else ''}
+                    ORDER BY renews_on NULLS LAST, id""")
+
+
+def get_subscription(sub_id):
+    return one('SELECT * FROM my_subscriptions WHERE id = %s', (sub_id,))
+
+
+def find_subscription(text):
+    return rows("""SELECT * FROM my_subscriptions WHERE is_active AND (name ILIKE %s OR notes ILIKE %s OR check_target ILIKE %s)
+                   ORDER BY id""", (f'%{text}%', f'%{text}%', f'%{text}%'))
+
+
+SUB_FIELDS = ('name', 'renews_on', 'cycle', 'auto_renew', 'check_kind', 'check_target', 'amount_text', 'notes', 'is_active')
+
+
+def save_subscription(sub_id=None, **fields):
+    fields = {k: v for k, v in fields.items() if k in SUB_FIELDS and v is not None}
+    if sub_id:
+        if not fields:
+            return get_subscription(sub_id)
+        sets = ', '.join(f'{k} = %s' for k in fields)
+        return one(f'UPDATE my_subscriptions SET {sets} WHERE id = %s RETURNING *', (*fields.values(), sub_id))
+    cols = ', '.join(fields)
+    marks = ', '.join(['%s'] * len(fields))
+    return one(f'INSERT INTO my_subscriptions ({cols}) VALUES ({marks}) RETURNING *', tuple(fields.values()))
+
+
+def set_subscription_check(sub_id, renews_on, note, problem):
+    return one("""UPDATE my_subscriptions SET renews_on = COALESCE(%s, renews_on), last_check_note = %s,
+                         last_problem = %s, last_checked_at = now()
+                  WHERE id = %s RETURNING *""", (renews_on, note[:500], problem[:500], sub_id))

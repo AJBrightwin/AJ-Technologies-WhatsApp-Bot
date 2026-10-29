@@ -682,6 +682,30 @@ T.update({
     },
 })
 
+# ---------------------------------------------------------------- upgrade v3 (AI conversation)
+T.update({
+    'ai_nudge': {
+        'en': "Hi {name}, we were in the middle of {what}. Would you like to continue? Just reply here and I'll pick up from where we stopped.",
+        'ta': "வணக்கம் {name}, நாம் {what} பற்றி பேசிக்கொண்டிருந்தோம். தொடரலாமா? இங்கே பதில் அனுப்புங்கள், விட்ட இடத்திலிருந்து தொடர்கிறேன்.",
+        'tanglish': "Vanakkam {name}, naama {what} pathi pesikittu irundhom. Continue pannalaamaa? Inga reply pannunga, vitta idathula irundhu thodarren.",
+    },
+    'ai_check_summary': {
+        'en': "Please check the details above and tap *Submit*, or tell me what to change.",
+        'ta': "மேலே உள்ள விவரங்களைச் சரிபார்த்து *அனுப்பு* தட்டுங்கள், அல்லது எதை மாற்ற வேண்டும் என்று சொல்லுங்கள்.",
+        'tanglish': "Mela ulla details-ah check panni *Submit* tap pannunga, illa edha maathanum-nu sollunga.",
+    },
+    'ai_file_ack': {
+        'en': "Thank you, I've received your file and shared it with our team. They will go through it.",
+        'ta': "நன்றி, உங்கள் கோப்பு கிடைத்தது, எங்கள் குழுவிடம் பகிர்ந்துவிட்டேன். அவர்கள் பார்ப்பார்கள்.",
+        'tanglish': "Nandri, unga file kedaichiduchu, engal team-kitta share pannitten. Avanga paarppanga.",
+    },
+    'ai_booked': {
+        'en': "✅ Your call is booked for *{when}*. Our team will call you on {phone}.",
+        'ta': "✅ உங்கள் அழைப்பு *{when}* அன்று பதிவு செய்யப்பட்டது. எங்கள் குழு {phone} எண்ணில் அழைக்கும்.",
+        'tanglish': "✅ Unga call *{when}*-ku book aayiduchu. Engal team {phone}-la call pannuvanga.",
+    },
+})
+
 LANG_SET_OTHER = "Done! I'll reply in {language} from now on. 👍"
 
 

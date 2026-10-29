@@ -96,9 +96,22 @@ TPL_LANG = env('TPL_LANG', 'en')
 TPL_LANG_TA = env('TPL_LANG_TA', '')                 # e.g. "ta" if you also approved Tamil versions
 
 # ---------------------------------------------------------------------------
+# Upgrade v3: AI conversation, files to AJ, subscription reminders
+# ---------------------------------------------------------------------------
+# true = customers chat with the AI in their own words (menus only when they ask, or if OpenAI is down)
+AI_CONVERSATION = env('AI_CONVERSATION', 'true').lower() == 'true'
+# Approved template with a DOCUMENT header, used to send a customer's file to AJ when his 24 hours are closed
+TPL_ADMIN_FILE = env('TPL_ADMIN_FILE', 'aj_file_alert')
+# Your own subscriptions (Render, Supabase, Meta, OpenAI, domain ...): reminder every day at this time (India time),
+# starting this many days before the renewal date, until you tell the bot it is renewed
+SUBS_ALERT_AT = env('SUBS_ALERT_AT', '12:00')
+SUBS_ALERT_DAYS = env_int('SUBS_ALERT_DAYS', 7)
+
+# ---------------------------------------------------------------------------
 # Business details (used in replies and by the AI)
 # ---------------------------------------------------------------------------
 BOT_NAME = 'AJ Technologies Assistant'
+OWNER_NAME = env('OWNER_NAME', 'A.J. Brightwin')      # Founder, CEO and Owner (the bot says this when asked)
 COMPANY = 'AJ Technologies'
 TAGLINE = 'We Build, You Grow'
 SITE_URL = env('SITE_URL', 'https://ajtechnologiesltd.com').rstrip('/')
