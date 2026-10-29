@@ -497,8 +497,7 @@ def answer_question_mid_flow(c, text, note, image=None):
     except Exception as e:
         log.warning('AI mid-flow answer failed: %s', e)
         return False
-    if reply and ai.mentions_price(reply):
-        reply = t(lang(c), 'price_policy')
+    reply = ai.guard_reply(lang(c), text, reply)
     if reply:
         text_to(c, reply)
         return True
@@ -1514,6 +1513,8 @@ def handle_text(c, text, first_time=False):
 
 def free_chat(c, text, first_time=False, image=None):
     reply, calls = '', []
+    if not image and ai.enabled() and ai.is_off_topic(text):
+        return say(c, 'off_topic')
     if ai.enabled():
         try:
             reply, calls = ai.chat(c, db.recent_messages(c['wa_id']), lang(c), image=image,
@@ -1527,8 +1528,7 @@ def free_chat(c, text, first_time=False, image=None):
             reply, calls = '', simple_route(text)
     else:
         calls = simple_route(text)
-    if reply and ai.mentions_price(reply):
-        reply = t(lang(c), 'price_policy')
+    reply = ai.guard_reply(lang(c), text, reply)
     if reply:
         text_to(c, reply)
     ran = False

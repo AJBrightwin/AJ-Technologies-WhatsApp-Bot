@@ -31,6 +31,7 @@ log = logging.getLogger('bot.app')
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
 
+log.info('AJ Technologies Assistant %s starting (AI conversation: %s)', config.VERSION, config.AI_CONVERSATION)
 for problem in config.check():
     log.error('SETUP: %s Add it in Render > Environment (or in .env on your computer).', problem)
 if not config.APP_SECRET:
@@ -55,7 +56,8 @@ def health():
     except Exception as e:
         database = 'not reachable'
         problems.append(f'Database: {e.__class__.__name__}')
-    return jsonify(ok=not problems, database=database, ai=bool(config.OPENAI_API_KEY),
+    return jsonify(ok=not problems, version=config.VERSION, ai_conversation=config.AI_CONVERSATION,
+                   database=database, ai=bool(config.OPENAI_API_KEY),
                    signature_check=bool(config.APP_SECRET), problems=problems), (200 if not problems else 503)
 
 

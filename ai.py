@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import threading
+import time
 from datetime import datetime
 
 import config
@@ -20,6 +21,7 @@ log = logging.getLogger('bot.ai')
 _client = None
 _client_lock = threading.Lock()
 _cache = {}
+_down = {'until': 0.0}
 _cache_lock = threading.Lock()
 
 
@@ -45,10 +47,15 @@ def _complete(messages, json_mode=False, tools=None, max_tokens=500, temperature
     if tools:
         kwargs['tools'] = tools
         kwargs['tool_choice'] = 'auto'
+    if time.time() < _down['until']:
+        raise ConnectionError('OpenAI was not reachable a moment ago; using the menus for now')
     try:
         return client().chat.completions.create(**kwargs).choices[0].message
     except Exception as e:
         report_problem(e)
+        name = type(e).__name__
+        if name in ('APIConnectionError', 'APITimeoutError') or problem_kind(e):
+            _down['until'] = time.time() + 60          # skip OpenAI for a minute so customers get the menu at once
         raise
 
 
@@ -191,6 +198,46 @@ def mentions_price(text):
 
 def asks_price(text):
     return bool(PRICE_WORDS.search(text or ''))
+
+
+REPLY_CHECK = """You check the draft reply of "AJ Technologies Assistant", the WhatsApp assistant of AJ Technologies
+(a company that builds websites, online stores, apps and software for businesses, and does SEO / digital marketing).
+
+The draft is NOT OK if it does ANY of these:
+- explains, teaches or gives information about a topic that is not AJ Technologies or getting our services
+  (e.g. explains what "vibe coding" is, how to code, general knowledge, news, health, recipes, other companies)
+- gives a price, cost, range, estimate, "starting from" amount or any money figure
+- promises a delivery date or timeline
+- mentions any other customer's or client's private details
+Otherwise it is OK (greetings, answers about AJ Technologies, questions to collect the customer's needs, booking a
+call, project status, support, polite refusals are all OK).
+Reply JSON only: {"ok": true} or {"ok": false}."""
+
+
+def reply_ok(customer_text, reply):
+    """Second safety check on the AI's draft reply. True = safe to send. Fails open only on technical errors."""
+    try:
+        msg = _complete([{'role': 'system', 'content': REPLY_CHECK},
+                         {'role': 'user', 'content': f'Customer: {customer_text[:800]}\n\nDraft reply: {reply[:2500]}'}],
+                        json_mode=True, max_tokens=10, temperature=0)
+        return json.loads(msg.content or '{}').get('ok') is not False
+    except Exception as e:
+        log.info('Reply check skipped: %s', e)
+        return True
+
+
+def guard_reply(lang_code, customer_text, reply):
+    """All safety checks on a reply to a customer. Returns the text to send (the draft, or a fixed safe text)."""
+    from texts import t
+    if not reply:
+        return reply
+    if mentions_price(reply):
+        log.warning('Blocked a reply with a price: %s', reply[:300])
+        return t(lang_code, 'price_policy')
+    if not reply_ok(customer_text, reply):
+        log.warning('Blocked an off-topic / unsafe reply: %s', reply[:300])
+        return t(lang_code, 'price_policy' if asks_price(customer_text) else 'off_topic')
+    return reply
 
 
 def history_messages(history):

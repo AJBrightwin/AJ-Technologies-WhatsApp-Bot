@@ -111,6 +111,7 @@ SUBS_ALERT_DAYS = env_int('SUBS_ALERT_DAYS', 7)
 # Business details (used in replies and by the AI)
 # ---------------------------------------------------------------------------
 BOT_NAME = 'AJ Technologies Assistant'
+VERSION = 'v3.2'                                      # shown at /health, so you can see which code Render runs
 OWNER_NAME = env('OWNER_NAME', 'A.J. Brightwin')      # Founder, CEO and Owner (the bot says this when asked)
 COMPANY = 'AJ Technologies'
 TAGLINE = 'We Build, You Grow'

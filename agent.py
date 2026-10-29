@@ -217,13 +217,13 @@ def converse(c, note='', image=None):
         log.warning('AI failed after a tool ran (%s); sending the plain confirmation', e)
         reply = ''
     save(c, a)
-    deliver(c, reply, turn)
+    customer_text = next((m['content'] for m in reversed(history) if m['role'] == 'user' and isinstance(m['content'], str)), '')
+    log.info('AI reply to %s (%s): %s', c['wa_id'][-4:], config.VERSION, (reply or '')[:120].replace('\n', ' '))
+    deliver(c, reply, turn, customer_text)
 
 
-def deliver(c, reply, turn):
-    if reply and ai.mentions_price(reply):
-        log.warning('AI reply had a price in it; replaced with the price policy: %s', reply[:300])
-        reply = t(bot.lang(c), 'price_policy')
+def deliver(c, reply, turn, customer_text=''):
+    reply = ai.guard_reply(bot.lang(c), customer_text, reply)
     sent = False
     if reply:
         bot.text_to(c, reply)
