@@ -5,6 +5,7 @@ Every message the bot sends goes through here and is saved in wa_messages,
 so the admin dashboard shows the full conversation.
 """
 import logging
+import re
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -66,7 +67,42 @@ def _post(payload):
         return None, f'Unexpected reply from WhatsApp: {r.text[:200]}'
 
 
+# The admin dashboard link (and any old Render address of it) is for AJ only, never for customers
+DASHBOARD_LINK = re.compile(r'(https?://)?(www\.)?(admin\.ajtechnologiesltd\.com|[\w-]*admin[\w-]*\.onrender\.com)[^\s)]*',
+                            re.I)
+
+
+def _scrub(text):
+    return re.sub(r'[ \t]{2,}', ' ', DASHBOARD_LINK.sub('', text or '')).strip() if text else text
+
+
+def _private(to, payload, log_body):
+    """Remove the dashboard link from anything sent to a number that is not AJ's."""
+    if config.digits(to) == config.ADMIN_WA_NUMBER:
+        return payload, log_body
+    if not DASHBOARD_LINK.search(str(payload) + str(log_body)):
+        return payload, log_body
+    log.warning('Removed the admin dashboard link from a message to %s', to)
+    kind = payload.get('type')
+    if kind == 'text':
+        payload['text']['body'] = _scrub(payload['text']['body']) or '.'
+    elif kind == 'interactive':
+        it = payload['interactive']
+        it['body']['text'] = _scrub(it['body']['text']) or '.'
+        if it.get('footer'):
+            it['footer']['text'] = _scrub(it['footer']['text']) or config.COMPANY
+    elif kind in ('image', 'document') and payload[kind].get('caption'):
+        payload[kind]['caption'] = _scrub(payload[kind]['caption'])
+    elif kind == 'template':
+        for comp in payload['template'].get('components', []):
+            for p in comp.get('parameters', []):
+                if p.get('type') == 'text':
+                    p['text'] = _scrub(p['text']) or '-'
+    return payload, _scrub(log_body)
+
+
 def _send(to, payload, log_type, log_body, sender='bot', record=True):
+    payload, log_body = _private(to, payload, log_body)
     wamid, error = _post({'to': to, **payload})
     if error:
         log.warning('Send to %s failed: %s', to, error)

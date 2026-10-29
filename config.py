@@ -116,7 +116,8 @@ OWNER_NAME = env('OWNER_NAME', 'A.J. Brightwin')      # Founder, CEO and Owner (
 COMPANY = 'AJ Technologies'
 TAGLINE = 'We Build, You Grow'
 SITE_URL = env('SITE_URL', 'https://ajtechnologiesltd.com').rstrip('/')
-DASHBOARD_URL = env('DASHBOARD_URL', 'https://admin.ajtechnologiesltd.com').rstrip('/')
+# Fixed on purpose (not read from Render), and only ever sent to ADMIN_WA_NUMBER (see whatsapp.py)
+DASHBOARD_URL = 'https://admin.ajtechnologiesltd.com/'
 PORTFOLIO_URL = f'{SITE_URL}/portfolio/'
 CONTACT_URL = f'{SITE_URL}/contact/'
 PRIVACY_URL = f'{SITE_URL}/privacy-policy/'
