@@ -158,8 +158,26 @@ def send_template(to, name, language, body_params=(), header_image='', quick_rep
     template = {'name': name, 'language': {'code': language}}
     if components:
         template['components'] = components
+    if quick_reply_payloads:
+        # if the approved template has no / fewer quick-reply buttons, send it again without our button ids
+        wamid, error = _send(to, {'type': 'template', 'template': template}, 'template',
+                             preview or f'[Template: {name}]', sender, record=False)
+        if not error or 'button' not in error.lower():
+            if record:
+                _record(to, sender, preview or f'[Template: {name}]', wamid, error)
+            return wamid, error
+        template['components'] = [c for c in components if c['type'] != 'button']
+        if not template['components']:
+            template.pop('components')
     return _send(to, {'type': 'template', 'template': template}, 'template',
                  preview or f'[Template: {name}]', sender, record)
+
+
+def _record(to, sender, body, wamid, error):
+    try:
+        db.save_outbound(to, sender, 'template', body, wamid=wamid, status='failed' if error else 'sent', error=error)
+    except Exception:
+        log.exception('Could not save outgoing message')
 
 
 def mark_read_and_typing(message_id):

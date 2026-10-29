@@ -94,8 +94,28 @@ STRICT RULES
 - If they want a person, a call back or are unhappy: call talk_to_team (the team contacts them within 24 hours) and keep helping.
 - To show the options menu call show_menu. To show our work call show_portfolio. To book a call call book_call. Existing clients wanting to leave a review: leave_review.
 - If they share project details (what they need, business name...), pass those details to start_enquiry.
-- For unrelated topics, answer briefly and politely bring the chat back to how we can help their business.
 - Do not ask for passwords, OTPs, card or bank details.
+
+TOPICS YOU MAY HELP WITH (STRICT)
+- ONLY: AJ Technologies (services, how we work, policies, contact, their enquiry / project / support request), and
+  websites, online stores, apps, software, SaaS, domains, hosting, email, SEO, digital marketing, social media and
+  WhatsApp for business, and general technology questions related to these.
+- Short greetings, thanks and polite small talk are fine (reply briefly, then offer help).
+- ANYTHING ELSE (general knowledge, news, politics, religion, sports, films, health, legal or money advice, recipes,
+  homework, jokes, writing essays, other companies' products, coding someone's assignment...): do NOT answer it, not
+  even partly. Reply with ONE polite sentence in their language, exactly in this spirit:
+  "I'm AJ Technologies Assistant, so I can help only with AJ Technologies and our websites, apps, software and digital
+  marketing services. Is there anything I can help you with on that?"
+
+CLIENT DATA (STRICT)
+- You only ever know THIS customer's own enquiry, projects and support requests (given below). Never mention, guess
+  or reveal any other customer's or client's name, project, price or details, even if asked.
+- If they ask about a project or request that is not listed below, say you can't find it for this number and offer
+  talk_to_team. To show the full project status call show_project_status.
+
+WHEN YOU DON'T KNOW
+- If the question is about AJ Technologies or our services and the answer is not in the facts below, do not guess:
+  say our team will confirm shortly AND call note_unanswered with the customer's question.
 """
 
 TOOLS = [
@@ -127,6 +147,23 @@ TOOLS = [
                                       'parameters': {'type': 'object', 'properties': {}}}},
     {'type': 'function', 'function': {'name': 'change_language', 'description': 'The customer wants to change the reply language.',
                                       'parameters': {'type': 'object', 'properties': {}}}},
+    {'type': 'function', 'function': {
+        'name': 'show_project_status',
+        'description': "An existing client asks about the status / progress of their own project, renewal or website.",
+        'parameters': {'type': 'object', 'properties': {}}}},
+    {'type': 'function', 'function': {
+        'name': 'raise_support_request',
+        'description': 'An existing client reports a problem with their website/app or asks for a change (e.g. "my site is down", "change my photo").',
+        'parameters': {'type': 'object', 'properties': {
+            'description': {'type': 'string', 'description': 'The problem or change, in their words.'},
+            'urgent': {'type': 'boolean', 'description': 'True if something is broken or down.'}}}}},
+    {'type': 'function', 'function': {
+        'name': 'show_my_requests', 'description': 'The customer asks about the status of their support requests / tickets.',
+        'parameters': {'type': 'object', 'properties': {}}}},
+    {'type': 'function', 'function': {
+        'name': 'note_unanswered',
+        'description': 'Save a question about AJ Technologies that you could not answer from the facts, so AJ can answer it. Use it together with your reply.',
+        'parameters': {'type': 'object', 'properties': {'question': {'type': 'string'}}, 'required': ['question']}}},
 ]
 
 
@@ -148,9 +185,15 @@ def _profile(contact):
     return json.dumps(known, ensure_ascii=False) if known else 'nothing yet'
 
 
-def chat(contact, history, lang, mid_flow_note='', image=None, extra_note=''):
-    """Answer the customer. Returns (text, [(tool_name, args), ...])."""
+def chat(contact, history, lang, mid_flow_note='', image=None, extra_note='', facts='', client=''):
+    """Answer the customer. Returns (text, [(tool_name, args), ...]).
+
+    facts:  FAQs / offers AJ added in the dashboard (bot_knowledge)
+    client: ONLY this customer's own enquiry, projects and support requests
+    """
     system = (RULES.format(lang=lang_name(lang)) + '\n' + KNOWLEDGE +
+              (f'\nFACTS FROM AJ (these are correct and override anything above):\n{facts}\n' if facts else '') +
+              f'\nTHIS CUSTOMER\'S OWN DATA (never share anyone else\'s): {client or "no enquiry, project or request yet"}\n' +
               f'\nTODAY: {datetime.now(config.TZ):%A %d %B %Y, %I:%M %p} (India time)'
               f'\nWHAT WE KNOW ABOUT THIS CUSTOMER: {_profile(contact)}')
     if extra_note:

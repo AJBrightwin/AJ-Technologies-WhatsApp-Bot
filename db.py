@@ -380,3 +380,251 @@ def admin_summary():
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+# ===========================================================================
+# Upgrade v2 (supabase_upgrade_v2.sql)
+# ===========================================================================
+# ---- once-a-day jobs ------------------------------------------------------
+def claim_state(key, value):
+    """True only for the first caller that stores this value (e.g. today's date) for this key."""
+    return one("""INSERT INTO bot_state (key, value) VALUES (%s, %s)
+                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+                  WHERE bot_state.value IS DISTINCT FROM EXCLUDED.value
+                  RETURNING key""", (key, value)) is not None
+
+
+def get_state(key):
+    row = one('SELECT value FROM bot_state WHERE key = %s', (key,))
+    return row['value'] if row else ''
+
+
+# ---- client data: ALWAYS filtered by the exact WhatsApp number -----------
+def client_projects(wa_id, limit=5):
+    return rows("""SELECT * FROM client_projects WHERE %s = ANY(wa_ids) AND is_active
+                   ORDER BY updated_at DESC LIMIT %s""", (wa_id, limit))
+
+
+def client_project(project_id, wa_id):
+    """A project only if it belongs to this number (never another client's)."""
+    return one('SELECT * FROM client_projects WHERE id = %s AND %s = ANY(wa_ids)', (project_id, wa_id))
+
+
+def client_renewals(project_ids, days=60):
+    if not project_ids:
+        return []
+    return rows("""SELECT * FROM client_renewals WHERE project_id = ANY(%s) AND status = 'active'
+                   AND expiry_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + %s
+                   ORDER BY expiry_date""", (list(project_ids), days))
+
+
+def client_tickets(wa_id, limit=5, open_only=False):
+    return rows(f"""SELECT t.*, p.title AS project_title FROM support_tickets t
+                    LEFT JOIN client_projects p ON p.id = t.project_id
+                    WHERE t.wa_id = %s {"AND t.status NOT IN ('resolved', 'closed')" if open_only else ''}
+                    ORDER BY t.created_at DESC LIMIT %s""", (wa_id, limit))
+
+
+def create_ticket(wa_id, project_id, client_name, description, attachments, priority):
+    return one("""INSERT INTO support_tickets (wa_id, project_id, client_name, description, attachments, priority)
+                  VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
+               (wa_id, project_id, client_name[:120], description[:4000], attachments, priority))
+
+
+def get_ticket(ticket_id):
+    return one("""SELECT t.*, p.title AS project_title FROM support_tickets t
+                  LEFT JOIN client_projects p ON p.id = t.project_id WHERE t.id = %s""", (ticket_id,))
+
+
+def set_ticket_status(ticket_id, status, client_update=''):
+    return one("""UPDATE support_tickets SET status = %s,
+                         client_update = CASE WHEN %s <> '' THEN %s ELSE client_update END,
+                         resolved_at = CASE WHEN %s IN ('resolved', 'closed') THEN COALESCE(resolved_at, now()) ELSE NULL END
+                  WHERE id = %s RETURNING *""", (status, client_update, client_update, status, ticket_id))
+
+
+# ---- knowledge -------------------------------------------------------------
+def knowledge():
+    return rows("""SELECT kind, question, answer FROM bot_knowledge WHERE is_active
+                   ORDER BY sort_order, id LIMIT 80""")
+
+
+def add_unanswered(wa_id, question):
+    question = ' '.join(str(question or '').split())[:1000]
+    if not question:
+        return
+    run("""INSERT INTO bot_unanswered (wa_id, question)
+           SELECT %s, %s WHERE NOT EXISTS (
+               SELECT 1 FROM bot_unanswered WHERE status = 'pending' AND lower(question) = lower(%s)
+                 AND created_at > now() - interval '14 days')""", (wa_id, question, question))
+
+
+# ---- website enquiry acknowledgements (S) ----------------------------------
+def claim_enquiry_acks(max_age_hours, limit=10):
+    return rows("""WITH c AS (
+                       INSERT INTO wa_enquiry_acks (enquiry_id, status)
+                       SELECT id, 'sending' FROM contact_enquiries
+                       WHERE source IN ('home', 'contact')
+                         AND created_at > now() - make_interval(hours => %s)
+                         AND length(regexp_replace(phone, '\\D', '', 'g')) >= 10
+                       ORDER BY created_at LIMIT %s
+                       ON CONFLICT (enquiry_id) DO NOTHING RETURNING enquiry_id)
+                   SELECT e.* FROM contact_enquiries e JOIN c ON c.enquiry_id = e.id""", (max_age_hours, limit))
+
+
+def finish_ack(enquiry_id, status, error=''):
+    run('UPDATE wa_enquiry_acks SET status = %s, error = %s WHERE enquiry_id = %s', (status, error[:1000], enquiry_id))
+
+
+# ---- old-lead follow-ups (E) -----------------------------------------------
+def claim_followups(after_days, max_age_days, limit=10):
+    return rows("""WITH c AS (
+                       INSERT INTO wa_lead_followups (enquiry_id, status)
+                       SELECT id, 'sending' FROM contact_enquiries
+                       WHERE status IN ('new', 'quoted')
+                         AND created_at < now() - make_interval(days => %s)
+                         AND created_at > now() - make_interval(days => %s)
+                         AND length(regexp_replace(phone, '\\D', '', 'g')) >= 10
+                       ORDER BY created_at LIMIT %s
+                       ON CONFLICT (enquiry_id) DO NOTHING RETURNING enquiry_id)
+                   SELECT e.* FROM contact_enquiries e JOIN c ON c.enquiry_id = e.id""",
+                (after_days, max_age_days, limit))
+
+
+def finish_followup(enquiry_id, status, error=''):
+    run('UPDATE wa_lead_followups SET status = %s, error = %s WHERE enquiry_id = %s', (status, error[:1000], enquiry_id))
+
+
+def followup_reply(enquiry_id, reply):
+    run('UPDATE wa_lead_followups SET reply = %s WHERE enquiry_id = %s', (reply, enquiry_id))
+
+
+def get_enquiry(enquiry_id):
+    return one('SELECT * FROM contact_enquiries WHERE id = %s', (enquiry_id,))
+
+
+def set_enquiry_status(enquiry_id, status):
+    return one('UPDATE contact_enquiries SET status = %s WHERE id = %s RETURNING *', (status, enquiry_id))
+
+
+# ---- renewals (H) ----------------------------------------------------------
+def due_renewals(limit=30):
+    """Renewals that reached the 30 / 7 / 1 day mark and were not reminded for it yet."""
+    return rows("""SELECT r.*, p.client_name, p.business_name, p.wa_ids, p.title AS project_title,
+                          (r.expiry_date - (now() AT TIME ZONE 'Asia/Kolkata')::date) AS days_left
+                   FROM client_renewals r JOIN client_projects p ON p.id = r.project_id
+                   WHERE r.status = 'active' AND r.auto_remind AND p.is_active
+                     AND r.expiry_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
+                     AND ((r.expiry_date - (now() AT TIME ZONE 'Asia/Kolkata')::date <= 1 AND r.reminded_1_at IS NULL)
+                       OR (r.expiry_date - (now() AT TIME ZONE 'Asia/Kolkata')::date <= 7 AND r.reminded_7_at IS NULL)
+                       OR (r.expiry_date - (now() AT TIME ZONE 'Asia/Kolkata')::date <= 30 AND r.reminded_30_at IS NULL))
+                   ORDER BY r.expiry_date LIMIT %s""", (limit,))
+
+
+def mark_renewal_reminded(renewal_id, days_left):
+    """Marks this mark and every earlier one, so a reminder is never sent twice."""
+    run("""UPDATE client_renewals SET
+               reminded_30_at = COALESCE(reminded_30_at, now()),
+               reminded_7_at  = CASE WHEN %s <= 7 THEN COALESCE(reminded_7_at, now()) ELSE reminded_7_at END,
+               reminded_1_at  = CASE WHEN %s <= 1 THEN COALESCE(reminded_1_at, now()) ELSE reminded_1_at END
+           WHERE id = %s""", (days_left, days_left, renewal_id))
+
+
+def get_renewal(renewal_id):
+    return one("""SELECT r.*, p.client_name, p.wa_ids, p.title AS project_title FROM client_renewals r
+                  JOIN client_projects p ON p.id = r.project_id WHERE r.id = %s""", (renewal_id,))
+
+
+# ---- summaries for AJ (O, P, N) -------------------------------------------
+IST_TODAY = "(now() AT TIME ZONE 'Asia/Kolkata')::date"
+IST_DAY = "(created_at AT TIME ZONE 'Asia/Kolkata')::date"
+
+
+def daily_summary_data():
+    s = one(f"""SELECT
+        (SELECT count(*) FROM contact_enquiries WHERE {IST_DAY} = {IST_TODAY} - 1) AS leads_yesterday,
+        (SELECT count(*) FROM contact_enquiries WHERE {IST_DAY} = {IST_TODAY} - 1 AND source = 'bot') AS bot_yesterday,
+        (SELECT count(*) FROM contact_enquiries WHERE status = 'new') AS not_contacted,
+        (SELECT count(*) FROM wa_contacts WHERE needs_reply AND wa_id <> %s) AS waiting,
+        (SELECT count(DISTINCT wa_id) FROM wa_messages WHERE direction = 'in' AND wa_id <> %s
+            AND {IST_DAY} = {IST_TODAY} - 1) AS chats_yesterday,
+        (SELECT count(*) FROM support_tickets WHERE status NOT IN ('resolved', 'closed')) AS open_tickets,
+        (SELECT count(*) FROM support_tickets WHERE status NOT IN ('resolved', 'closed') AND priority = 'urgent') AS urgent_tickets,
+        (SELECT count(*) FROM bot_unanswered WHERE status = 'pending') AS unanswered""",
+        (config.ADMIN_WA_NUMBER, config.ADMIN_WA_NUMBER))
+    s['calls'] = rows(f"""SELECT name, phone, call_time, topic FROM wa_bookings
+                          WHERE status = 'booked' AND call_date = {IST_TODAY} ORDER BY call_time""")
+    s['renewals'] = rows(f"""SELECT r.item, r.label, r.expiry_date, p.client_name FROM client_renewals r
+                             JOIN client_projects p ON p.id = r.project_id
+                             WHERE r.status = 'active' AND r.expiry_date BETWEEN {IST_TODAY} AND {IST_TODAY} + 7
+                             ORDER BY r.expiry_date""")
+    s['failures'] = rows("""SELECT 'follow-up' AS what, error FROM wa_lead_followups
+                                WHERE status = 'failed' AND created_at > now() - interval '1 day'
+                            UNION ALL
+                            SELECT 'website thank-you', error FROM wa_enquiry_acks
+                                WHERE status = 'failed' AND created_at > now() - interval '1 day'
+                            LIMIT 5""")
+    return s
+
+
+def weekly_report_data():
+    """Last 7 full days (India time) compared with the 7 days before."""
+    week = f"{IST_DAY} BETWEEN {IST_TODAY} - 7 AND {IST_TODAY} - 1"
+    prev = f"{IST_DAY} BETWEEN {IST_TODAY} - 14 AND {IST_TODAY} - 8"
+    r = one(f"""SELECT
+        (SELECT count(*) FROM contact_enquiries WHERE {week}) AS leads,
+        (SELECT count(*) FROM contact_enquiries WHERE {prev}) AS leads_prev,
+        (SELECT count(*) FROM contact_enquiries WHERE {week} AND source = 'bot') AS from_bot,
+        (SELECT count(*) FROM contact_enquiries WHERE {week} AND source = 'home') AS from_home,
+        (SELECT count(*) FROM contact_enquiries WHERE {week} AND source = 'contact') AS from_contact,
+        (SELECT count(*) FROM contact_enquiries WHERE {week} AND submitted_via = 'whatsapp') AS via_wa_button,
+        (SELECT count(*) FROM contact_enquiries WHERE {week} AND status <> 'new') AS contacted,
+        (SELECT count(*) FROM contact_enquiries WHERE status = 'won' AND (updated_at AT TIME ZONE 'Asia/Kolkata')::date
+            BETWEEN {IST_TODAY} - 7 AND {IST_TODAY} - 1) AS won,
+        (SELECT count(*) FROM contact_enquiries WHERE status = 'won') AS won_all,
+        (SELECT count(*) FROM contact_enquiries WHERE status IN ('won', 'closed')) AS decided_all,
+        (SELECT count(*) FROM wa_contacts WHERE {week} AND wa_id <> %s) AS new_chats,
+        (SELECT count(*) FROM wa_messages WHERE {week} AND direction = 'in' AND wa_id <> %s) AS messages_in,
+        (SELECT count(*) FROM wa_bookings WHERE call_date BETWEEN {IST_TODAY} - 7 AND {IST_TODAY} - 1) AS calls,
+        (SELECT count(*) FROM wa_bookings WHERE call_date BETWEEN {IST_TODAY} - 7 AND {IST_TODAY} - 1 AND status = 'done') AS calls_done,
+        (SELECT count(*) FROM support_tickets WHERE {week}) AS tickets_new,
+        (SELECT count(*) FROM support_tickets WHERE (resolved_at AT TIME ZONE 'Asia/Kolkata')::date
+            BETWEEN {IST_TODAY} - 7 AND {IST_TODAY} - 1) AS tickets_resolved,
+        (SELECT count(*) FROM client_reviews WHERE {week}) AS reviews""",
+        (config.ADMIN_WA_NUMBER, config.ADMIN_WA_NUMBER))
+    r['services'] = rows(f"""SELECT s AS name, count(*) AS n FROM contact_enquiries, jsonb_array_elements_text(services) s
+                             WHERE {week} GROUP BY s ORDER BY n DESC LIMIT 5""")
+    busy = one(f"""SELECT extract(hour FROM created_at AT TIME ZONE 'Asia/Kolkata')::int AS h, count(*) AS n
+                   FROM wa_messages WHERE {week} AND direction = 'in' AND wa_id <> %s
+                   GROUP BY 1 ORDER BY 2 DESC LIMIT 1""", (config.ADMIN_WA_NUMBER,))
+    r['busiest_hour'] = busy['h'] if busy else None
+    day = one(f"""SELECT to_char(created_at AT TIME ZONE 'Asia/Kolkata', 'FMDay') AS d, count(*) AS n
+                  FROM wa_messages WHERE {week} AND direction = 'in' AND wa_id <> %s
+                  GROUP BY 1 ORDER BY 2 DESC LIMIT 1""", (config.ADMIN_WA_NUMBER,))
+    r['busiest_day'] = day['d'] if day else None
+    return r
+
+
+# ---- admin commands (N) ----------------------------------------------------
+def new_enquiries(limit=10):
+    return rows("SELECT * FROM contact_enquiries WHERE status = 'new' ORDER BY created_at DESC LIMIT %s", (limit,))
+
+
+def calls_on(day):
+    return rows("""SELECT * FROM wa_bookings WHERE status = 'booked' AND call_date = %s ORDER BY call_time""", (day,))
+
+
+def open_tickets(limit=15):
+    return rows("""SELECT t.*, p.title AS project_title FROM support_tickets t
+                   LEFT JOIN client_projects p ON p.id = t.project_id
+                   WHERE t.status NOT IN ('resolved', 'closed')
+                   ORDER BY (t.priority = 'urgent') DESC, t.created_at LIMIT %s""", (limit,))
+
+
+def upcoming_renewals(days=30):
+    return rows(f"""SELECT r.*, p.client_name FROM client_renewals r JOIN client_projects p ON p.id = r.project_id
+                    WHERE r.status = 'active' AND r.expiry_date <= {IST_TODAY} + %s ORDER BY r.expiry_date""", (days,))
+
+
+def pending_unanswered(limit=10):
+    return rows("""SELECT * FROM bot_unanswered WHERE status = 'pending' ORDER BY created_at DESC LIMIT %s""", (limit,))

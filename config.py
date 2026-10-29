@@ -70,7 +70,30 @@ CALL_REMINDER_MINUTES = env_int('CALL_REMINDER_MINUTES', 60)     # remind you be
 NUDGE_AFTER_HOURS = env_int('NUDGE_AFTER_HOURS', 22)             # remind a customer who stopped halfway
 BROADCAST_PER_TICK = max(1, env_int('BROADCAST_PER_TICK', 20))
 
+# Every schedule below uses India time (Asia/Kolkata), whatever time zone the server or database is in.
 TZ = ZoneInfo('Asia/Kolkata')
+
+# ---------------------------------------------------------------------------
+# Upgrade v2: scheduled messages (India time)
+# ---------------------------------------------------------------------------
+DAILY_SUMMARY_AT = env('DAILY_SUMMARY_AT', '09:00')   # daily summary to AJ
+WEEKLY_REPORT_WEEKDAY = env_int('WEEKLY_REPORT_WEEKDAY', 0)   # 0 = Monday, sent with the daily summary
+FOLLOWUP_AFTER_DAYS = env_int('FOLLOWUP_AFTER_DAYS', 7)       # enquiry still New / Quoted after this many days
+FOLLOWUP_MAX_AGE_DAYS = env_int('FOLLOWUP_MAX_AGE_DAYS', 30)  # never follow up enquiries older than this
+FOLLOWUP_HOURS = (10, 19)                                      # only send follow-ups between 10 AM and 7 PM
+RENEWAL_HOURS = (10, 19)                                       # renewal reminders between 10 AM and 7 PM
+ACK_WEBSITE_ENQUIRIES = env('ACK_WEBSITE_ENQUIRIES', 'true').lower() == 'true'
+ACK_HOURS = (7, 22)                                            # "thank you" for website enquiries: 7 AM to 10 PM
+ACK_MAX_AGE_HOURS = 12                                         # skip it if the enquiry is older than this
+
+# Approved Meta templates for messages the bot starts (customer has not written in 24 hours)
+TPL_ENQUIRY_RECEIVED = env('TPL_ENQUIRY_RECEIVED', 'enquiry_received')
+TPL_LEAD_FOLLOWUP = env('TPL_LEAD_FOLLOWUP', 'lead_followup')
+TPL_PROJECT_UPDATE = env('TPL_PROJECT_UPDATE', 'project_update')
+TPL_RENEWAL_REMINDER = env('TPL_RENEWAL_REMINDER', 'renewal_reminder')
+TPL_TICKET_UPDATE = env('TPL_TICKET_UPDATE', 'ticket_update')
+TPL_LANG = env('TPL_LANG', 'en')
+TPL_LANG_TA = env('TPL_LANG_TA', '')                 # e.g. "ta" if you also approved Tamil versions
 
 # ---------------------------------------------------------------------------
 # Business details (used in replies and by the AI)

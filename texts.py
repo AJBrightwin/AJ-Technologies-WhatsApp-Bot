@@ -541,6 +541,147 @@ T = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Upgrade v2: off-topic, client projects, support requests, follow-ups, renewals
+# ---------------------------------------------------------------------------
+T.update({
+    'off_topic': {
+        'en': "I'm *AJ Technologies Assistant* 🙂 I can help only with AJ Technologies and our websites, apps, software and digital marketing services. Is there anything I can help you with on that?",
+        'ta': "நான் *AJ Technologies Assistant* 🙂 AJ Technologies மற்றும் எங்கள் இணையதளம், ஆப்ஸ், மென்பொருள், டிஜிட்டல் மார்க்கெட்டிங் சேவைகள் பற்றி மட்டுமே என்னால் உதவ முடியும். அதைப் பற்றி ஏதாவது உதவி வேண்டுமா?",
+        'tanglish': "Naan *AJ Technologies Assistant* 🙂 AJ Technologies matrum engal website, apps, software, digital marketing services pathi mattum dhaan help panna mudiyum. Adhu pathi edhaavadhu help venumaa?",
+    },
+    'what_support': {'en': "your support request", 'ta': "உதவி கோரிக்கை", 'tanglish': "support request"},
+    'm_project': {'en': "📊 My project", 'ta': "📊 என் திட்டம்", 'tanglish': "📊 En project"},
+    'm_project_d': {'en': "For clients: status of your project", 'ta': "வாடிக்கையாளர்களுக்கு: திட்ட நிலை", 'tanglish': "Clients-ku: project status"},
+    'm_support': {'en': "🛠️ Support request", 'ta': "🛠️ உதவி கோரிக்கை", 'tanglish': "🛠️ Support request"},
+    'm_support_d': {'en': "Report a problem or ask for a change", 'ta': "சிக்கல் அல்லது மாற்றம் தெரிவிக்க", 'tanglish': "Problem illa change sollunga"},
+    'b_project': {'en': "📊 My project", 'ta': "📊 என் திட்டம்", 'tanglish': "📊 En project"},
+    'b_support': {'en': "🛠️ Support", 'ta': "🛠️ உதவி", 'tanglish': "🛠️ Support"},
+    'b_team': {'en': "👤 Talk to team", 'ta': "👤 குழுவிடம் பேச", 'tanglish': "👤 Team kitta pesa"},
+    'b_my_requests': {'en': "📋 My requests", 'ta': "📋 என் கோரிக்கைகள்", 'tanglish': "📋 En requests"},
+
+    # project status (only the projects linked to THIS WhatsApp number)
+    'ps_none': {
+        'en': "I couldn't find a project linked to this WhatsApp number. 🙂 If you're already our client, our team can link it for you. If you'd like to start a new project, tap *Get a quote*.",
+        'ta': "இந்த வாட்ஸ்அப் எண்ணுடன் இணைக்கப்பட்ட திட்டம் எதுவும் கிடைக்கவில்லை. 🙂 நீங்கள் ஏற்கனவே எங்கள் வாடிக்கையாளர் என்றால், எங்கள் குழு அதை இணைத்துத் தரும். புதிய திட்டம் தொடங்க *மதிப்பீடு பெற* தட்டுங்கள்.",
+        'tanglish': "Indha WhatsApp number-oda link aana project edhuvum kedaikala. 🙂 Neenga already engal client-na, engal team adha link pannitharuvanga. Pudhu project-ku *Quote venum* tap pannunga.",
+    },
+    'ps_title': {'en': "📊 *Your project with AJ Technologies*", 'ta': "📊 *AJ Technologies உடனான உங்கள் திட்டம்*", 'tanglish': "📊 *AJ Technologies-oda unga project*"},
+    'ps_title_many': {'en': "📊 *Your projects with AJ Technologies*", 'ta': "📊 *AJ Technologies உடனான உங்கள் திட்டங்கள்*", 'tanglish': "📊 *AJ Technologies-oda unga projects*"},
+    'ps_stage': {'en': "Stage", 'ta': "நிலை", 'tanglish': "Stage"},
+    'ps_progress': {'en': "Progress", 'ta': "முன்னேற்றம்", 'tanglish': "Progress"},
+    'ps_update': {'en': "Latest update", 'ta': "சமீபத்திய தகவல்", 'tanglish': "Latest update"},
+    'ps_live': {'en': "Live link", 'ta': "நேரலை இணைப்பு", 'tanglish': "Live link"},
+    'ps_renewal': {'en': "Renewal", 'ta': "புதுப்பித்தல்", 'tanglish': "Renewal"},
+    'ps_open_requests': {'en': "Open support requests: {n}", 'ta': "திறந்த உதவி கோரிக்கைகள்: {n}", 'tanglish': "Open support requests: {n}"},
+    'ps_footer': {
+        'en': "Questions about your project? Just type here, or tap *Support* to raise a request.",
+        'ta': "திட்டம் பற்றிக் கேள்விகள் உள்ளதா? இங்கே டைப் செய்யுங்கள், அல்லது கோரிக்கை வைக்க *உதவி* தட்டுங்கள்.",
+        'tanglish': "Project pathi questions irukkaa? Inga type pannunga, illa request-ku *Support* tap pannunga.",
+    },
+    'stage_requirement': {'en': "Requirements", 'ta': "தேவைகள்", 'tanglish': "Requirements"},
+    'stage_design': {'en': "Design", 'ta': "வடிவமைப்பு", 'tanglish': "Design"},
+    'stage_development': {'en': "Development", 'ta': "உருவாக்கம்", 'tanglish': "Development"},
+    'stage_testing': {'en': "Testing", 'ta': "சோதனை", 'tanglish': "Testing"},
+    'stage_launch': {'en': "Launch", 'ta': "வெளியீடு", 'tanglish': "Launch"},
+    'stage_live': {'en': "Live ✅", 'ta': "நேரலையில் ✅", 'tanglish': "Live ✅"},
+    'stage_support': {'en': "Support & maintenance", 'ta': "ஆதரவு & பராமரிப்பு", 'tanglish': "Support & maintenance"},
+    'stage_on_hold': {'en': "On hold", 'ta': "நிறுத்தி வைக்கப்பட்டது", 'tanglish': "On hold"},
+    'item_domain': {'en': "domain", 'ta': "டொமைன்", 'tanglish': "domain"},
+    'item_hosting': {'en': "hosting", 'ta': "ஹோஸ்டிங்", 'tanglish': "hosting"},
+    'item_ssl': {'en': "SSL certificate", 'ta': "SSL சான்றிதழ்", 'tanglish': "SSL certificate"},
+    'item_amc': {'en': "maintenance plan (AMC)", 'ta': "பராமரிப்புத் திட்டம் (AMC)", 'tanglish': "maintenance plan (AMC)"},
+    'item_email': {'en': "business email", 'ta': "வணிக மின்னஞ்சல்", 'tanglish': "business email"},
+    'item_app_store': {'en': "app store account", 'ta': "ஆப் ஸ்டோர் கணக்கு", 'tanglish': "app store account"},
+    'item_other': {'en': "service", 'ta': "சேவை", 'tanglish': "service"},
+
+    # support requests
+    'sp_start': {
+        'en': "Sure, let's raise a support request. 🛠️ (Type *cancel* anytime to stop.)",
+        'ta': "சரி, ஒரு உதவி கோரிக்கையைப் பதிவு செய்வோம். 🛠️ (நிறுத்த *cancel* என டைப் செய்யுங்கள்.)",
+        'tanglish': "Seri, oru support request podalaam. 🛠️ (Stop panna *cancel* nu type pannunga.)",
+    },
+    'sp_pick_project': {'en': "Which project is this about?", 'ta': "இது எந்தத் திட்டம் பற்றியது?", 'tanglish': "Idhu endha project pathi?"},
+    'sp_pick_button': {'en': "Choose project", 'ta': "திட்டத்தைத் தேர்வு", 'tanglish': "Project choose"},
+    'sp_other_project': {'en': "Something else", 'ta': "வேறு ஏதாவது", 'tanglish': "Vera edhaavadhu"},
+    'sp_ask_desc': {
+        'en': "Please describe the problem or the change you need. You can type, send a voice note or a screenshot. 📎",
+        'ta': "சிக்கலையோ தேவையான மாற்றத்தையோ விவரியுங்கள். டைப் செய்யலாம், voice note அல்லது screenshot அனுப்பலாம். 📎",
+        'tanglish': "Problem illa venum-na change-ah sollunga. Type pannalaam, voice note illa screenshot anuppalaam. 📎",
+    },
+    'sp_more_detail': {
+        'en': "Got it 👍 Please add a short description in words too, so our team understands it quickly.",
+        'ta': "கிடைத்தது 👍 எங்கள் குழு விரைவாகப் புரிந்துகொள்ள, சில வார்த்தைகளிலும் விவரியுங்கள்.",
+        'tanglish': "Kedaichiduchu 👍 Engal team seekiram purinjukka, konjam words-laiyum sollunga.",
+    },
+    'sp_ask_priority': {
+        'en': "Is it urgent? (for example, your website or app is not working)",
+        'ta': "இது அவசரமா? (எ.கா. உங்கள் இணையதளம் அல்லது ஆப் வேலை செய்யவில்லை)",
+        'tanglish': "Idhu urgent-aa? (e.g. unga website illa app work aagala)",
+    },
+    'b_urgent': {'en': "🔴 Urgent", 'ta': "🔴 அவசரம்", 'tanglish': "🔴 Urgent"},
+    'b_normal': {'en': "🟢 Not urgent", 'ta': "🟢 அவசரம் இல்லை", 'tanglish': "🟢 Urgent illa"},
+    'sp_confirm': {
+        'en': "Please confirm your request:\n\n📁 *Project:* {project}\n📝 {desc}\n⚡ *Priority:* {priority}",
+        'ta': "உங்கள் கோரிக்கையை உறுதி செய்யுங்கள்:\n\n📁 *திட்டம்:* {project}\n📝 {desc}\n⚡ *முன்னுரிமை:* {priority}",
+        'tanglish': "Unga request-ah confirm pannunga:\n\n📁 *Project:* {project}\n📝 {desc}\n⚡ *Priority:* {priority}",
+    },
+    'sp_done': {
+        'en': "✅ Your support request *#{id}* is registered. Our team will update you right here. Type *my requests* anytime to see the status.",
+        'ta': "✅ உங்கள் உதவி கோரிக்கை *#{id}* பதிவானது. எங்கள் குழு இங்கேயே தகவல் தரும். நிலையை அறிய எப்போது வேண்டுமானாலும் *my requests* என டைப் செய்யுங்கள்.",
+        'tanglish': "✅ Unga support request *#{id}* register aayiduchu. Engal team inga update pannuvanga. Status paarkka eppo venumnaalum *my requests* nu type pannunga.",
+    },
+    'sp_list_title': {'en': "📋 *Your support requests*", 'ta': "📋 *உங்கள் உதவி கோரிக்கைகள்*", 'tanglish': "📋 *Unga support requests*"},
+    'sp_list_none': {
+        'en': "You have no support requests yet. Tap *Support* if you need help with your website or app.",
+        'ta': "உங்களுக்கு இன்னும் உதவி கோரிக்கைகள் இல்லை. உதவி தேவைப்பட்டால் *உதவி* தட்டுங்கள்.",
+        'tanglish': "Ungalukku innum support requests illa. Help venum-na *Support* tap pannunga.",
+    },
+    'tk_open': {'en': "Received", 'ta': "பெறப்பட்டது", 'tanglish': "Received"},
+    'tk_in_progress': {'en': "In progress", 'ta': "நடைபெறுகிறது", 'tanglish': "In progress"},
+    'tk_waiting': {'en': "Waiting for your reply", 'ta': "உங்கள் பதிலுக்காகக் காத்திருக்கிறது", 'tanglish': "Unga reply-ku waiting"},
+    'tk_resolved': {'en': "Resolved ✅", 'ta': "தீர்க்கப்பட்டது ✅", 'tanglish': "Resolved ✅"},
+    'tk_closed': {'en': "Closed", 'ta': "மூடப்பட்டது", 'tanglish': "Closed"},
+    'tk_update': {
+        'en': "🛠️ Update on your support request *#{id}*: *{status}*\n{note}",
+        'ta': "🛠️ உங்கள் உதவி கோரிக்கை *#{id}* பற்றிய தகவல்: *{status}*\n{note}",
+        'tanglish': "🛠️ Unga support request *#{id}* update: *{status}*\n{note}",
+    },
+
+    # old-lead follow-up replies
+    'fu_not_now': {
+        'en': "No problem at all! 🙏 Whenever you're ready, just message us here and we'll be happy to help.",
+        'ta': "பரவாயில்லை! 🙏 நீங்கள் தயாரானதும் இங்கே செய்தி அனுப்புங்கள், மகிழ்ச்சியுடன் உதவுவோம்.",
+        'tanglish': "Paravaayilla! 🙏 Neenga ready aanadhum inga message pannunga, sandhoshama help pannuvom.",
+    },
+    'fu_details': {
+        'en': "Sure! Here are our services. Tap one for details, or ask me anything. Our team will also contact you soon. 🙂",
+        'ta': "சரி! இதோ எங்கள் சேவைகள். விவரங்களுக்கு ஒன்றைத் தட்டுங்கள், அல்லது எதுவும் கேளுங்கள். எங்கள் குழுவும் விரைவில் தொடர்புகொள்ளும். 🙂",
+        'tanglish': "Seri! Idho engal services. Details-ku onna tap pannunga, illa edhu venumnaalum kelunga. Engal team-um seekiram contact pannuvanga. 🙂",
+    },
+
+    # renewals
+    'rn_thanks': {
+        'en': "Thank you! 🙏 Our team will contact you shortly to renew it on time.",
+        'ta': "நன்றி! 🙏 சரியான நேரத்தில் புதுப்பிக்க எங்கள் குழு விரைவில் தொடர்புகொள்ளும்.",
+        'tanglish': "Nandri! 🙏 Time-ku renew panna engal team seekiram contact pannuvanga.",
+    },
+
+    'rn_reminder': {
+        'en': "🔁 Reminder from AJ Technologies: your {item} *{label}* expires on *{date}* ({days} days left). Shall we renew it for you?",
+        'ta': "🔁 AJ Technologies நினைவூட்டல்: உங்கள் {item} *{label}* *{date}* அன்று காலாவதியாகிறது (இன்னும் {days} நாட்கள்). நாங்கள் புதுப்பிக்கலாமா?",
+        'tanglish': "🔁 AJ Technologies reminder: unga {item} *{label}* *{date}* anniku expire aagudhu (innum {days} naal). Naanga renew pannalaamaa?",
+    },
+    'b_renew': {'en': "✅ Renew it", 'ta': "✅ புதுப்பிக்கவும்", 'tanglish': "✅ Renew pannunga"},
+    'b_call_me': {'en': "📞 Call me", 'ta': "📞 அழையுங்கள்", 'tanglish': "📞 Call pannunga"},
+    # project update (sent from the dashboard while the 24-hour window is open)
+    'pu_update': {
+        'en': "📊 Update on your project *{title}*: *{stage}* ({progress}%)\n{note}",
+        'ta': "📊 உங்கள் திட்டம் *{title}* பற்றிய தகவல்: *{stage}* ({progress}%)\n{note}",
+        'tanglish': "📊 Unga project *{title}* update: *{stage}* ({progress}%)\n{note}",
+    },
+})
+
 LANG_SET_OTHER = "Done! I'll reply in {language} from now on. 👍"
 
 

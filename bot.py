@@ -8,6 +8,7 @@ never loses their place.
 import logging
 import re
 import threading
+import time
 from datetime import date, datetime, time as dtime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -111,6 +112,11 @@ GREETINGS = re.compile(r'^\s*(hi+|hello+|hey+|hai+|helo|hlo|vanakkam|vanakam|வ
                        r'(sir|madam|mam|anna|akka|bro|team|aj)?[\s!.,🙏👋😊]*$', re.I)
 REVIEW_WORDS = {'write a review', 'review', 'leave a review', '⭐ write a review', 'review ezhudhu', '⭐ review ezhudhu',
                 'விமர்சனம் எழுது', '⭐ விமர்சனம் எழுது'}
+PROJECT_WORDS = {'status', 'project status', 'my project', 'my projects', 'project', 'en project', 'project eppadi irukku',
+                 'திட்டம்', 'என் திட்டம்', 'திட்ட நிலை', '📊 my project'}
+REQUEST_WORDS = {'my requests', 'my request', 'my tickets', 'tickets', 'ticket status', 'request status', 'en requests',
+                 'என் கோரிக்கைகள்', '📋 my requests'}
+SUPPORT_WORDS = {'support', 'support request', 'complaint', 'help request', 'உதவி', '🛠️ support', '🛠️ support request'}
 STOP_WORDS = {'stop', 'unsubscribe', 'stop offers', 'நிறுத்து'}
 START_WORDS = {'start', 'subscribe', 'start offers'}
 
@@ -227,7 +233,9 @@ def handle_message(wa_id, profile_name, message):
     wa.mark_read_and_typing(message.get('id'))
 
     if is_admin:
-        admin_reply(c)
+        if kind == 'audio':
+            text = voice_to_text(media)
+        admin_reply(c, text)
         return c
     if not c.get('bot_enabled', True):
         db.update_contact(wa_id, needs_reply=True)
@@ -360,6 +368,7 @@ def set_language(c, code):
 # ===========================================================================
 MENU = [('m:services', 'm_services', 'm_services_d'), ('m:prices', 'm_prices', 'm_prices_d'),
         ('m:work', 'm_work', 'm_work_d'), ('m:quote', 'm_quote', 'm_quote_d'), ('m:call', 'm_call', 'm_call_d'),
+        ('m:project', 'm_project', 'm_project_d'), ('m:support', 'm_support', 'm_support_d'),
         ('m:team', 'm_team', 'm_team_d'), ('m:review', 'm_review', 'm_review_d'), ('m:lang', 'm_lang', 'm_lang_d')]
 
 
@@ -459,7 +468,8 @@ def answer_question_mid_flow(c, text, note, image=None):
     if not ai.enabled():
         return False
     try:
-        reply, _ = ai.chat(c, db.recent_messages(c['wa_id']), lang(c), mid_flow_note=note, image=image)
+        reply, _ = ai.chat(c, db.recent_messages(c['wa_id']), lang(c), mid_flow_note=note, image=image,
+                           facts=facts_text(), client=client_context(c))
     except Exception as e:
         log.warning('AI mid-flow answer failed: %s', e)
         return False
@@ -1347,12 +1357,20 @@ def handle_action(c, action):
         return booking_action(c, state, action)
     if head == 'rv' and fl == 'review':
         return review_action(c, state, action)
+    if action == 'sp:list':
+        return show_my_requests(c)
+    if head == 'sp' and fl == 'support':
+        return support_action(c, state, action)
+    if head == 'fu':
+        return followup_action(c, action)
+    if head == 'rn':
+        return renewal_action(c, action)
     # a button from an old message
     send_menu(c, t(lang(c), 'expired'))
 
 
 def menu_action(c, item):
-    if item in ('quote', 'call', 'review') and flow(c)[0]:
+    if item in ('quote', 'call', 'review', 'support') and flow(c)[0]:
         clear_state(c)
     if item == 'menu':
         return send_menu(c)
@@ -1372,6 +1390,10 @@ def menu_action(c, item):
         return start_review(c)
     if item == 'lang':
         return ask_language(c)
+    if item == 'project':
+        return show_project_status(c)
+    if item == 'support':
+        return start_support(c)
     send_menu(c)
 
 
@@ -1383,6 +1405,8 @@ def resume_flow(c):
         return ask_booking_step(c, state, state.get('step') or 'day')
     if fl == 'review':
         return ask_review_step(c, state, state.get('step') or 'rating')
+    if fl == 'support':
+        return ask_support_step(c, state, state.get('step') or 'desc')
     send_menu(c)
 
 
@@ -1403,6 +1427,15 @@ def handle_text(c, text, first_time=False):
         return welcome(c)
     if low in REVIEW_WORDS:
         return start_review(c)
+    if low in PROJECT_WORDS:
+        clear_state(c)
+        return show_project_status(c)
+    if low in REQUEST_WORDS:
+        clear_state(c)
+        return show_my_requests(c)
+    if low in SUPPORT_WORDS:
+        clear_state(c)
+        return start_support(c)
     if re.search(r'\b(change|cancel|reschedule)\s+(my\s+)?call\b|call\s*(maathu|maatru|cancel)', low):
         clear_state(c)
         return start_booking(c)
@@ -1416,6 +1449,8 @@ def handle_text(c, text, first_time=False):
         return booking_text(c, state, text)
     if fl == 'review':
         return review_text(c, state, text)
+    if fl == 'support':
+        return support_text(c, state, text)
     return free_chat(c, text, first_time)
 
 
@@ -1423,7 +1458,12 @@ def free_chat(c, text, first_time=False, image=None):
     reply, calls = '', []
     if ai.enabled():
         try:
-            reply, calls = ai.chat(c, db.recent_messages(c['wa_id']), lang(c), image=image)
+            reply, calls = ai.chat(c, db.recent_messages(c['wa_id']), lang(c), image=image,
+                                   facts=facts_text(), client=client_context(c))
+            for name, args in calls:
+                if name == 'note_unanswered':
+                    db.add_unanswered(c['wa_id'], args.get('question') or text)
+            calls = [call for call in calls if call[0] != 'note_unanswered']
         except Exception as e:
             log.warning('AI chat failed: %s', e)
             reply, calls = '', simple_route(text)
@@ -1460,6 +1500,13 @@ def run_tool(c, name, args, intro=True):
         return ask_language(c)
     if name == 'show_prices':
         return show_prices(c)
+    if name == 'show_project_status':
+        return show_project_status(c)
+    if name == 'raise_support_request':
+        return start_support(c, desc=str(args.get('description') or '')[:2000],
+                             urgent=args.get('urgent') if isinstance(args.get('urgent'), bool) else None, intro=intro)
+    if name == 'show_my_requests':
+        return show_my_requests(c)
     return False
 
 
@@ -1472,6 +1519,8 @@ def simple_route(text):
         (r'call me|book.*call|appointment|meeting|call back|callback', 'book_call'),
         (r'human|person|agent|staff|talk to|speak to|owner|manager|complaint', 'talk_to_team'),
         (r'review|feedback|rating', 'leave_review'),
+        (r'status|progress|my project|update on my', 'show_project_status'),
+        (r'not working|down|error|problem|issue|bug|broken|change my|update my', 'raise_support_request'),
         (r'language|tamil|english|மொழி', 'change_language'),
         (r'service|website|web site|app|store|shop|seo|marketing|hosting|domain|software', 'show_services'),
     ]
@@ -1483,9 +1532,13 @@ def simple_route(text):
 
 def handle_media(c, kind, caption, media):
     fl, state = flow(c)
-    if fl == 'enquiry' and kind in ('image', 'document', 'video'):
+    if fl in ('enquiry', 'support') and kind in ('image', 'document', 'video'):
         state['data']['attachments'] = int(state['data'].get('attachments') or 0) + 1
         set_state(c, state)
+    if fl == 'support' and state.get('step') == 'desc' and kind in ('image', 'document', 'video'):
+        if caption and len(caption) >= 3:
+            return support_text(c, state, caption)
+        return say(c, 'sp_more_detail')
     if kind == 'sticker':
         return None
     image = None
@@ -1495,7 +1548,7 @@ def handle_media(c, kind, caption, media):
             image = (data, mime, caption)
     if fl:
         note = {'enquiry': 'giving details for a free quote', 'booking': 'booking a free call',
-                'review': 'leaving a review'}[fl]
+                'review': 'leaving a review', 'support': 'raising a support request'}[fl]
         if not (image and answer_question_mid_flow(c, caption, note + ' and just sent an image', image=image)):
             say(c, 'media_thanks')
         return resume_flow(c)
@@ -1515,7 +1568,8 @@ def send_nudge(c):
     fl, state = flow(c)
     if not fl or not db.window_open(c):
         return
-    what = t(lang(c), {'enquiry': 'what_enquiry', 'booking': 'what_booking', 'review': 'what_review'}[fl])
+    what = t(lang(c), {'enquiry': 'what_enquiry', 'booking': 'what_booking', 'review': 'what_review',
+                        'support': 'what_support'}[fl])
     name = valid_name((state.get('data') or {}).get('name'))
     buttons(c, t(lang(c), 'nudge', name=name.split()[0] if name else friendly(c), what=what),
             [('flow:continue', 'b_continue'), ('flow:cancel', 'b_cancel')])
@@ -1524,7 +1578,12 @@ def send_nudge(c):
 # ===========================================================================
 # AJ messages the bot (admin)
 # ===========================================================================
-def admin_reply(c):
+def admin_reply(c, text=''):
+    import admin
+    return admin.handle(c, text)
+
+
+def admin_summary_text():
     s = db.admin_summary()
     text = (f"Hi AJ 👋 Here is your quick summary:\n\n"
             f"📥 New enquiries (not contacted): *{s['new_enquiries']}*\n"
@@ -1533,5 +1592,310 @@ def admin_reply(c):
             f"📅 Calls today: *{s['calls_today']}* · Later: *{s['calls_later']}*\n\n"
             f"Dashboard: {config.DASHBOARD_URL}\n\n"
             "Alerts can now reach you as normal messages for the next 24 hours. "
-            "To test the bot as a customer, message it from another phone.")
-    wa.send_text(c['wa_id'], text)
+            "To test the bot as a customer, message it from another phone.\n\nType *help* for all commands.")
+    return text
+
+
+# ===========================================================================
+# Upgrade v2: what the AI may know (dashboard FAQs + ONLY this customer's data)
+# ===========================================================================
+_facts = {'at': 0.0, 'text': ''}
+
+
+def facts_text():
+    """FAQs, info and offers from Dashboard > Bot knowledge (refreshed every minute)."""
+    if time.time() - _facts['at'] < 60:
+        return _facts['text']
+    try:
+        items = db.knowledge()
+    except Exception as e:
+        log.warning('Could not load bot knowledge: %s', e)
+        return _facts['text']
+    lines, size = [], 0
+    for k in items:
+        if k['kind'] == 'faq':
+            line = f"Q: {k['question']}\nA: {k['answer']}"
+        elif k['kind'] == 'offer':
+            line = f"CURRENT OFFER - {k['question']}: {k['answer']}"
+        else:
+            line = f"- {k['question']}: {k['answer']}" if k['question'] else f"- {k['answer']}"
+        size += len(line)
+        if size > 7000:
+            break
+        lines.append(line)
+    _facts.update(at=time.time(), text='\n'.join(lines))
+    return _facts['text']
+
+
+STAGES = ['requirement', 'design', 'development', 'testing', 'launch', 'live']
+
+
+def client_context(c):
+    """Everything the AI may know about THIS number. Nothing from any other customer."""
+    parts = []
+    try:
+        enquiry = db.latest_enquiry(c['wa_id'])
+        if enquiry and db.now() - enquiry['created_at'] < timedelta(days=120):
+            parts.append(f"enquiry #{enquiry['id']} on {enquiry['created_at']:%d %b %Y}: "
+                         f"{', '.join(enquiry['services'] or []) or 'service not given'}, status {enquiry['status']}")
+        for p in db.client_projects(c['wa_id']):
+            parts.append(f"project \"{p['title']}\": stage {p['stage']}, {p['progress']}% done"
+                         + (f", latest update: {p['client_note'][:300]}" if p['client_note'] else '')
+                         + (f", live at {p['live_url']}" if p['live_url'] else ''))
+        for tk in db.client_tickets(c['wa_id'], 3, open_only=True):
+            parts.append(f"support request #{tk['id']}: {tk['status']}, \"{tk['description'][:120]}\"")
+    except Exception as e:
+        log.warning('Could not load client context: %s', e)
+    return '; '.join(parts)
+
+
+# ===========================================================================
+# Upgrade v2: project status (F). Strictly the projects linked to this number.
+# ===========================================================================
+def progress_bar(pct):
+    pct = max(0, min(100, int(pct or 0)))
+    filled = round(pct / 10)
+    return '▓' * filled + '░' * (10 - filled) + f' {pct}%'
+
+
+def stage_line(c, stage):
+    if stage not in STAGES:
+        return ''
+    here = STAGES.index(stage)
+    names = labels(c, [f'stage_{x}' for x in STAGES[:-1]])
+    marks = []
+    for i, name in enumerate(names):
+        marks.append(('✅ ' if i < here or stage == 'live' else '⏳ ' if i == here else '▫️ ') + name.replace(' ✅', ''))
+    return ' → '.join(marks)
+
+
+def show_project_status(c):
+    projects = db.client_projects(c['wa_id'])
+    L = lang(c)
+    if not projects:
+        return buttons(c, t(L, 'ps_none'), [('m:quote', 'b_quote'), ('m:team', 'b_team'), ('m:menu', 'b_menu')])
+    renewals = db.client_renewals([p['id'] for p in projects], days=60)
+    open_requests = len(db.client_tickets(c['wa_id'], 20, open_only=True))
+    blocks = [t(L, 'ps_title_many' if len(projects) > 1 else 'ps_title')]
+    for p in projects:
+        lines = [f"*{p['title']}*" + (f" · {p['business_name']}" if p['business_name'] else '')]
+        lines.append(f"{t(L, 'ps_stage')}: *{t(L, 'stage_' + p['stage'])}*")
+        lines.append(f"{t(L, 'ps_progress')}: {progress_bar(p['progress'])}")
+        pipeline = stage_line(c, p['stage'])
+        if pipeline:
+            lines.append(pipeline)
+        if p['client_note']:
+            lines.append(f"📝 {t(L, 'ps_update')}: {p['client_note'][:600]}")
+        if p['live_url']:
+            lines.append(f"🔗 {t(L, 'ps_live')}: {p['live_url']}")
+        for r in renewals:
+            if r['project_id'] == p['id']:
+                lines.append(f"🔁 {t(L, 'ps_renewal')}: {t(L, 'item_' + r['item'])} {r['label']} · "
+                             f"{r['expiry_date'].day} {MONTHS[r['expiry_date'].month - 1]} {r['expiry_date'].year}")
+        blocks.append('\n'.join(lines))
+    if open_requests:
+        blocks.append(t(L, 'ps_open_requests', n=open_requests))
+    text_to(c, '\n\n'.join(blocks))
+    buttons(c, t(L, 'ps_footer'), [('m:support', 'b_support'), ('sp:list', 'b_my_requests'), ('m:menu', 'b_menu')])
+
+
+# ===========================================================================
+# Upgrade v2: support requests (I)
+# ===========================================================================
+def start_support(c, desc='', urgent=None, intro=True):
+    projects = db.client_projects(c['wa_id'])
+    data = {'project_id': None, 'project_title': '', 'desc': desc.strip(), 'attachments': 0,
+            'priority': ('urgent' if urgent else 'normal') if urgent is not None else ''}
+    if len(projects) == 1:
+        data.update(project_id=projects[0]['id'], project_title=projects[0]['title'])
+    state = {'flow': 'support', 'data': data, 'started': db.now().isoformat(),
+             'choose_project': len(projects) > 1}
+    if intro:
+        say(c, 'sp_start')
+    ask_support_step(c, state, next_support_step(state))
+
+
+def next_support_step(state):
+    data = state['data']
+    if state.get('choose_project'):
+        return 'project'
+    if len(data.get('desc') or '') < 3:
+        return 'desc'
+    if not data.get('priority'):
+        return 'priority'
+    return 'confirm'
+
+
+def ask_support_step(c, state, step):
+    state['step'] = step
+    set_state(c, state)
+    L, data = lang(c), state['data']
+    if step == 'project':
+        rows = [(f"sp:proj:{p['id']}", p['title'], p['business_name'] or '') for p in db.client_projects(c['wa_id'])][:9]
+        rows.append(('sp:proj:0', t(L, 'sp_other_project'), ''))
+        return wa.send_list(c['wa_id'], t(L, 'sp_pick_project'), t(L, 'sp_pick_button'), rows)
+    if step == 'desc':
+        return say(c, 'sp_ask_desc')
+    if step == 'priority':
+        return buttons(c, t(L, 'sp_ask_priority'), [('sp:pri:urgent', 'b_urgent'), ('sp:pri:normal', 'b_normal')])
+    priority = t(L, 'b_urgent' if data.get('priority') == 'urgent' else 'b_normal')
+    body = t(L, 'sp_confirm', project=data.get('project_title') or t(L, 'not_given'), desc=data['desc'][:700],
+             priority=priority)
+    if data.get('attachments'):
+        body += f"\n📎 {data['attachments']}"
+    buttons(c, body, [('sp:submit', 'b_submit'), ('sp:edit', 'b_edit'), ('sp:cancel', 'b_cancel')])
+
+
+def support_action(c, state, action):
+    parts = action.split(':')
+    data = state['data']
+    if action == 'sp:cancel':
+        clear_state(c)
+        return say(c, 'cancelled')
+    if action == 'sp:submit':
+        return submit_support(c, state)
+    if action == 'sp:edit':
+        data['desc'] = ''
+        return ask_support_step(c, state, 'desc')
+    if parts[1] == 'proj' and len(parts) == 3:
+        project = db.client_project(int(parts[2]), c['wa_id']) if parts[2].isdigit() and parts[2] != '0' else None
+        data.update(project_id=project['id'] if project else None, project_title=project['title'] if project else '')
+        state['choose_project'] = False
+        return ask_support_step(c, state, next_support_step(state))
+    if parts[1] == 'pri' and len(parts) == 3:
+        data['priority'] = 'urgent' if parts[2] == 'urgent' else 'normal'
+        return ask_support_step(c, state, next_support_step(state))
+    ask_support_step(c, state, next_support_step(state))
+
+
+def support_text(c, state, text):
+    step = state.get('step') or next_support_step(state)
+    data, low = state['data'], plain(text)
+    if low in CANCEL_WORDS:
+        clear_state(c)
+        return say(c, 'cancelled')
+    if step == 'desc':
+        if len(text.strip()) < 3:
+            return say(c, 'sp_ask_desc')
+        data['desc'] = (data.get('desc') + '\n' if data.get('desc') else '') + text.strip()[:2000]
+        return ask_support_step(c, state, next_support_step(state))
+    if step == 'priority':
+        if re.search(r'urgent|yes|down|not working|asap|avasaram|அவசர|aamam|aama', low):
+            data['priority'] = 'urgent'
+        elif re.search(r'no|normal|not urgent|illa|இல்லை', low):
+            data['priority'] = 'normal'
+        if data.get('priority'):
+            return ask_support_step(c, state, next_support_step(state))
+    if step == 'confirm' and low in YES_WORDS:
+        return submit_support(c, state)
+    if step == 'project':
+        for p in db.client_projects(c['wa_id']):
+            if p['title'].lower() in low or low in p['title'].lower():
+                return support_action(c, state, f"sp:proj:{p['id']}")
+    answer_question_mid_flow(c, text, 'raising a support request')
+    ask_support_step(c, state, step)
+
+
+def submit_support(c, state):
+    data = state['data']
+    if len(data.get('desc') or '') < 3:
+        return ask_support_step(c, state, 'desc')
+    if data.get('project_id') and not db.client_project(data['project_id'], c['wa_id']):
+        data.update(project_id=None, project_title='')      # never attach someone else's project
+    name = display_name(c) or 'Customer'
+    ticket = db.create_ticket(c['wa_id'], data.get('project_id'), name, data['desc'],
+                              int(data.get('attachments') or 0), data.get('priority') or 'normal')
+    clear_state(c)
+    urgent = ticket['priority'] == 'urgent'
+    db.queue_alert('new_ticket', f"{'🔴 URGENT ' if urgent else ''}Support request #{ticket['id']} from {name}"
+                   + (f" ({data['project_title']})" if data.get('project_title') else ''),
+                   wa_id=c['wa_id'], customer_name=name, customer_phone=phone_display(c['wa_id']),
+                   detail=data['desc'] + (f"\n\n{data['attachments']} file(s) in the chat" if data.get('attachments') else ''),
+                   ref_id=ticket['id'])
+    db.update_contact(c['wa_id'], needs_reply=True)
+    say(c, 'sp_done', id=ticket['id'])
+
+
+def ticket_status_label(c, status):
+    return t(lang(c), f'tk_{status}')
+
+
+def show_my_requests(c):
+    tickets = db.client_tickets(c['wa_id'], 5)
+    L = lang(c)
+    if not tickets:
+        return buttons(c, t(L, 'sp_list_none'), [('m:support', 'b_support'), ('m:menu', 'b_menu')])
+    lines = [t(L, 'sp_list_title'), '']
+    for tk in tickets:
+        when = tk['created_at'].astimezone(config.TZ)
+        lines.append(f"*#{tk['id']}* · {ticket_status_label(c, tk['status'])} · {when.day} {MONTHS[when.month - 1]}")
+        lines.append(f"   {' '.join(tk['description'].split())[:90]}")
+        if tk['client_update']:
+            lines.append(f"   💬 {tk['client_update'][:200]}")
+    text_to(c, '\n'.join(lines))
+    buttons(c, t(L, 'menu_body'), [('m:support', 'b_support'), ('m:project', 'b_project'), ('m:menu', 'b_menu')])
+
+
+# ===========================================================================
+# Upgrade v2: replies to the old-lead follow-up (E) and renewal reminder (H)
+# ===========================================================================
+def _own_enquiry(c, enquiry_id):
+    e = db.get_enquiry(enquiry_id) if str(enquiry_id).isdigit() else None
+    if e and config.digits(e['phone'])[-10:] == c['wa_id'][-10:]:
+        return e
+    return None
+
+
+def followup_action(c, action):
+    parts = action.split(':')
+    e = _own_enquiry(c, parts[2]) if len(parts) == 3 else None
+    choice = parts[1] if len(parts) > 1 else ''
+    if e:
+        db.followup_reply(e['id'], {'call': 'call', 'details': 'details', 'no': 'not_now'}.get(choice, choice)[:20])
+    name = display_name(c) or (e['name'] if e else 'A customer')
+    if choice == 'call':
+        if e:
+            db.queue_alert('lead_reply', f'{name} asked for a call after the follow-up (enquiry #{e["id"]})',
+                           wa_id=c['wa_id'], customer_name=name, customer_phone=phone_display(c['wa_id']), ref_id=e['id'])
+        return start_booking(c)
+    if choice == 'details':
+        if e:
+            db.queue_alert('lead_reply', f'{name} asked for more details after the follow-up (enquiry #{e["id"]})',
+                           wa_id=c['wa_id'], customer_name=name, customer_phone=phone_display(c['wa_id']), ref_id=e['id'])
+            db.update_contact(c['wa_id'], needs_reply=True)
+        say(c, 'fu_details')
+        return show_services(c)
+    say(c, 'fu_not_now')
+
+
+def renewal_action(c, action):
+    parts = action.split(':')
+    r = db.get_renewal(int(parts[2])) if len(parts) == 3 and parts[2].isdigit() else None
+    if not r or c['wa_id'] not in (r['wa_ids'] or []):
+        return send_menu(c)                                 # not this client's renewal
+    name = display_name(c) or r['client_name']
+    what = f"{r['item']} {r['label']}".strip()
+    when = f"{r['expiry_date'].day} {MONTHS[r['expiry_date'].month - 1]} {r['expiry_date'].year}"
+    db.queue_alert('renewal_reply', f'{name} wants to renew {what} (expires {when})', wa_id=c['wa_id'],
+                   customer_name=name, customer_phone=phone_display(c['wa_id']), ref_id=r['id'])
+    db.update_contact(c['wa_id'], needs_reply=True)
+    if parts[1] == 'call':
+        return start_booking(c)
+    say(c, 'rn_thanks')
+
+
+# ===========================================================================
+# Upgrade v2: messages to a client started by AJ (admin commands use these)
+# ===========================================================================
+def notify_ticket(ticket, note=''):
+    """Tell the client their support request changed. Free message inside 24 hours, otherwise the template."""
+    c = db.ensure_contact(ticket['wa_id'])
+    status = ticket_status_label(c, ticket['status'])
+    if db.window_open(c):
+        return buttons(c, t(lang(c), 'tk_update', id=ticket['id'], status=status, note=note or ''),
+                       [('sp:list', 'b_my_requests'), ('m:menu', 'b_menu')])
+    first = (display_name(c) or ticket['client_name'] or '').split(' ')[0] or 'there'
+    return wa.send_template(c['wa_id'], config.TPL_TICKET_UPDATE, config.TPL_LANG,
+                            [first, f"#{ticket['id']}", f"{t('en', 'tk_' + ticket['status'])}. {note}".strip()],
+                            quick_reply_payloads=['sp:list'],
+                            preview=f"[Template {config.TPL_TICKET_UPDATE}] Request #{ticket['id']}: {ticket['status']}. {note}")
